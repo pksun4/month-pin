@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import DraggableFlatList, {
+  ScaleDecorator,
+} from "react-native-draggable-flatlist";
 import type { MethodKind, PaymentMethod } from "../../data/models";
 import { useMonthPin } from "../../hooks/use-month-pin";
 import {
@@ -11,10 +13,11 @@ import {
 } from "../../utils/expenses";
 import { ExpenseRow } from "../../components/expense-row";
 import { MethodForm } from "../../components/method-form";
+import { ProviderIcon } from "../../components/provider-icon";
+import { PaymentMethodRow } from "../../components/payment-method-row";
 import {
   Button,
   Choice,
-  colors,
   Empty,
   FormModal,
   Header,
@@ -23,11 +26,24 @@ import {
 } from "../../components/ui";
 
 export default function WalletScreen() {
-  const { methods, expenses, deleteMethod, busy } = useMonthPin();
+  const { methods, expenses, deleteMethod, reorderMethods, busy } =
+    useMonthPin();
+  const [reordering, setReordering] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const savingOrderRef = useRef(false);
+  const [pendingOrder, setPendingOrder] = useState<PaymentMethod[] | null>(
+    null,
+  );
   const [kind, setKind] = useState<MethodKind>("bank");
   const [form, setForm] = useState<{ method?: PaymentMethod } | null>(null);
   const [selected, setSelected] = useState<PaymentMethod | null>(null);
-  const visible = methods.filter((method) => method.kind === kind);
+  const visible = useMemo(
+    () => methods.filter((method) => method.kind === kind),
+    [methods, kind],
+  );
+  const displayed = pendingOrder ?? visible;
+  const locked = busy || dragging || savingOrder;
   const related = selected ? relatedExpenses(selected, methods, expenses) : [];
   const linkedCards =
     selected?.kind === "bank"
@@ -35,6 +51,41 @@ export default function WalletScreen() {
           (method) => method.kind === "card" && method.bankId === selected.id,
         )
       : [];
+
+  function changeKind(nextKind: MethodKind) {
+    if (locked) return;
+    setKind(nextKind);
+    setReordering(false);
+    setPendingOrder(null);
+  }
+
+  async function saveOrder(next: PaymentMethod[]) {
+    if (busy || savingOrderRef.current) return;
+    savingOrderRef.current = true;
+    setSavingOrder(true);
+    setPendingOrder(next);
+    try {
+      await reorderMethods(
+        kind,
+        next.map((method) => method.id),
+      );
+    } catch {
+      Alert.alert("순서 변경 실패", "저장하지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      setPendingOrder(null);
+      savingOrderRef.current = false;
+      setSavingOrder(false);
+    }
+  }
+
+  function moveForAccessibility(index: number, direction: -1 | 1) {
+    if (locked) return;
+    const target = index + direction;
+    if (target < 0 || target >= displayed.length) return;
+    const next = [...displayed];
+    [next[index], next[target]] = [next[target], next[index]];
+    void saveOrder(next);
+  }
 
   function remove(method: PaymentMethod) {
     Alert.alert(
@@ -59,94 +110,144 @@ export default function WalletScreen() {
 
   return (
     <>
-      <Screen>
-        <Header
-          title="결제수단"
-          description="고정비가 나가는 통장과 카드"
-          action={<Button label="+ 등록" onPress={() => setForm({})} />}
-        />
-        <View style={s.row}>
-          <View style={s.flex}>
-            <Choice
-              label={`통장 ${methods.filter((method) => method.kind === "bank").length}`}
-              selected={kind === "bank"}
-              onPress={() => setKind("bank")}
-            />
-          </View>
-          <View style={s.flex}>
-            <Choice
-              label={`카드 ${methods.filter((method) => method.kind === "card").length}`}
-              selected={kind === "card"}
-              onPress={() => setKind("card")}
-            />
-          </View>
-        </View>
-        {visible.map((method) => (
-          <Pressable
-            key={method.id}
-            accessibilityRole="button"
-            accessibilityLabel={`${methodLabel(method)} 상세보기`}
-            onPress={() => setSelected(method)}
-            style={({ pressed }) => [s.card, pressed && { opacity: 0.65 }]}
-          >
-            <View style={s.between}>
-              <View style={[s.row, s.flex]}>
-                <View style={[s.emptyIcon, { marginBottom: 0 }]}>
-                  <Ionicons
-                    name={kind === "bank" ? "business-outline" : "card-outline"}
-                    size={26}
-                    color={colors.blue}
+      <Screen scrollable={false}>
+        <DraggableFlatList
+          key={kind}
+          data={displayed}
+          keyExtractor={(method) => `method-${method.id}`}
+          containerStyle={s.flex}
+          contentContainerStyle={[s.page, { gap: 0 }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          activationDistance={6}
+          autoscrollThreshold={72}
+          autoscrollSpeed={160}
+          onDragBegin={() => setDragging(true)}
+          onDragEnd={({ data, from, to }) => {
+            setDragging(false);
+            if (from !== to) void saveOrder(data);
+          }}
+          renderItem={({ item: method, drag, isActive, getIndex }) => (
+            <ScaleDecorator activeScale={1.02}>
+              <PaymentMethodRow
+                method={method}
+                total={monthlyTotal(relatedExpenses(method, methods, expenses))}
+                bank={methods.find((bank) => bank.id === method.bankId)}
+                onPress={() => setSelected(method)}
+                reorder={
+                  reordering
+                    ? {
+                        active: isActive,
+                        busy: busy || savingOrder || (dragging && !isActive),
+                        onDrag: () => {
+                          if (!locked && !savingOrderRef.current) drag();
+                        },
+                        canMoveUp: (getIndex() ?? 0) > 0,
+                        canMoveDown:
+                          (getIndex() ?? displayed.length - 1) <
+                          displayed.length - 1,
+                        onAccessibilityMove: (direction) => {
+                          const index = getIndex();
+                          if (index !== undefined)
+                            moveForAccessibility(index, direction);
+                        },
+                      }
+                    : undefined
+                }
+              />
+            </ScaleDecorator>
+          )}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          ListHeaderComponent={
+            <View style={{ gap: 20, marginBottom: 20 }}>
+              <Header
+                title="결제수단"
+                description="고정비가 나가는 통장과 카드"
+                action={
+                  <Button
+                    label="+ 등록"
+                    disabled={locked}
+                    onPress={() => {
+                      setReordering(false);
+                      setForm({});
+                    }}
+                  />
+                }
+              />
+              <View style={s.row}>
+                <View style={s.flex}>
+                  <Choice
+                    label={`통장 ${methods.filter((method) => method.kind === "bank").length}`}
+                    selected={kind === "bank"}
+                    disabled={locked}
+                    onPress={() => changeKind("bank")}
                   />
                 </View>
                 <View style={s.flex}>
-                  <Text style={s.caption}>{method.provider}</Text>
-                  <Text style={s.sectionTitle}>{method.name}</Text>
+                  <Choice
+                    label={`카드 ${methods.filter((method) => method.kind === "card").length}`}
+                    selected={kind === "card"}
+                    disabled={locked}
+                    onPress={() => changeKind("card")}
+                  />
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.muted} />
+              {(visible.length > 1 || reordering) && (
+                <View style={s.between}>
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    style={[s.caption, s.flex, { marginTop: 0 }]}
+                  >
+                    {reordering
+                      ? savingOrder
+                        ? "순서를 저장하고 있어요…"
+                        : "오른쪽 손잡이를 잡고 이동하세요."
+                      : `${kind === "bank" ? "통장" : "카드"} ${visible.length}개`}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: locked }}
+                    disabled={locked}
+                    onPress={() => setReordering((value) => !value)}
+                    style={({ pressed }) => ({
+                      minHeight: 44,
+                      justifyContent: "center",
+                      opacity: pressed || locked ? 0.5 : 1,
+                    })}
+                  >
+                    <Text style={s.textLink}>
+                      {reordering ? "완료" : "순서 변경"}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
-            <View style={s.divider} />
-            <View style={s.between}>
-              <Text style={s.caption}>연결된 월 고정비</Text>
-              <Text style={[s.body, { fontWeight: "700" }]}>
-                {money(
-                  monthlyTotal(relatedExpenses(method, methods, expenses)),
-                )}
-              </Text>
-            </View>
-            {kind === "card" && (
-              <Text style={s.caption}>
-                출금 통장:{" "}
-                {methodLabel(methods.find((bank) => bank.id === method.bankId))}
-                {"\n"}대금 출금일:{" "}
-                {method.settlementDay
-                  ? `매월 ${method.settlementDay}일`
-                  : "미지정"}
-              </Text>
-            )}
-          </Pressable>
-        ))}
-        {!visible.length && (
-          <Empty
-            icon={kind === "bank" ? "business-outline" : "card-outline"}
-            title={`등록된 ${kind === "bank" ? "통장이" : "카드가"} 없어요`}
-            description={
-              kind === "bank"
-                ? "은행과 별명을 입력해 통장을 등록해 주세요."
-                : "카드사와 카드 이름을 입력해 등록해 주세요."
-            }
-            action={
-              <Button
-                label={kind === "bank" ? "통장 등록" : "카드 등록"}
-                onPress={() => setForm({})}
-              />
-            }
-          />
-        )}
-        <Text style={s.caption}>
-          통장별 합계에는 해당 통장에서 대금을 내는 카드의 고정비도 포함돼요.
-          홈의 전체 합계는 각 고정비를 한 번씩 계산해요.
-        </Text>
+          }
+          ListEmptyComponent={
+            <Empty
+              icon={kind === "bank" ? "business-outline" : "card-outline"}
+              title={`등록된 ${kind === "bank" ? "통장이" : "카드가"} 없어요`}
+              description={
+                kind === "bank"
+                  ? "은행을 선택하고 별명을 입력해 통장을 등록해 주세요."
+                  : "카드사를 선택하고 카드 이름을 입력해 등록해 주세요."
+              }
+              action={
+                <Button
+                  label={kind === "bank" ? "통장 등록" : "카드 등록"}
+                  disabled={locked}
+                  onPress={() => setForm({})}
+                />
+              }
+            />
+          }
+          ListFooterComponent={
+            <Text style={[s.caption, { marginTop: 20 }]}>
+              통장별 합계에는 해당 통장에서 대금을 내는 카드의 고정비도
+              포함돼요. 홈의 전체 합계는 각 고정비를 한 번씩 계산해요.
+            </Text>
+          }
+        />
       </Screen>
       {(form || selected) && (
         <FormModal
@@ -174,7 +275,13 @@ export default function WalletScreen() {
             selected && (
               <>
                 <View style={s.card}>
-                  <Text style={s.caption}>{selected.provider}</Text>
+                  <View style={s.row}>
+                    <ProviderIcon
+                      code={selected.providerCode}
+                      kind={selected.kind}
+                    />
+                    <Text style={s.body}>{selected.provider}</Text>
+                  </View>
                   <Text style={s.title}>{selected.name}</Text>
                   <Text style={s.caption}>
                     연결된 월 고정비 · {related.length}개

@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import type { MethodKind, PaymentMethod } from "../data/models";
+import { getProvider, type ProviderCode } from "../data/providers";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { methodLabel, parseDay } from "../utils/expenses";
 import { Button, Choice, Field, s } from "./ui";
+import { ProviderSelect } from "./provider-select";
 
 export function MethodForm({
   method,
@@ -16,7 +18,9 @@ export function MethodForm({
 }) {
   const { methods, saveMethod, busy } = useMonthPin();
   const [kind, setKind] = useState<MethodKind>(method?.kind ?? initialKind);
-  const [provider, setProvider] = useState(method?.provider ?? "");
+  const [providerCode, setProviderCode] = useState<ProviderCode | null>(
+    method?.providerCode ?? null,
+  );
   const [name, setName] = useState(method?.name ?? "");
   const [bankId, setBankId] = useState<number | null>(method?.bankId ?? null);
   const [day, setDay] = useState(
@@ -26,11 +30,22 @@ export function MethodForm({
   const submitting = useRef(false);
   const banks = methods.filter((item) => item.kind === "bank");
 
+  function changeKind(nextKind: MethodKind) {
+    if (nextKind === kind) return;
+    setKind(nextKind);
+    setProviderCode(null);
+    setError("");
+  }
+
   async function submit() {
     if (submitting.current) return;
-    if (!provider.trim() || !name.trim()) {
+    if (!providerCode || getProvider(providerCode)?.kind !== kind) {
+      setError(`${kind === "bank" ? "은행을" : "카드사를"} 선택해 주세요.`);
+      return;
+    }
+    if (!name.trim()) {
       setError(
-        `${kind === "bank" ? "은행과 통장 별명" : "카드사와 카드 이름"}을 입력해 주세요.`,
+        `${kind === "bank" ? "통장 별명을" : "카드 이름을"} 입력해 주세요.`,
       );
       return;
     }
@@ -45,7 +60,7 @@ export function MethodForm({
       await saveMethod(
         {
           kind,
-          provider: provider.trim(),
+          providerCode,
           name: name.trim(),
           bankId: kind === "card" ? bankId : null,
           settlementDay,
@@ -68,24 +83,34 @@ export function MethodForm({
             <Choice
               label="통장"
               selected={kind === "bank"}
-              onPress={() => setKind("bank")}
+              onPress={() => changeKind("bank")}
             />
           </View>
           <View style={s.flex}>
             <Choice
               label="카드"
               selected={kind === "card"}
-              onPress={() => setKind("card")}
+              onPress={() => changeKind("card")}
             />
           </View>
         </View>
       )}
-      <Field
-        label={kind === "bank" ? "은행" : "카드사"}
-        value={provider}
-        onChangeText={setProvider}
-        placeholder={kind === "bank" ? "예: KB국민은행" : "예: 삼성카드"}
+      <ProviderSelect
+        key={kind}
+        kind={kind}
+        value={providerCode}
+        onChange={(value) => {
+          setProviderCode(value);
+          setError("");
+        }}
+        disabled={busy}
       />
+      {method && !method.providerCode && (
+        <Text style={s.caption}>
+          기존 기관명: {method.provider}. 수정하려면 목록에서{" "}
+          {kind === "bank" ? "은행을" : "카드사를"} 선택해 주세요.
+        </Text>
+      )}
       <Field
         label={kind === "bank" ? "통장 별명" : "카드 이름"}
         value={name}

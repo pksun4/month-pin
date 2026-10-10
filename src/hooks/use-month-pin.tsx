@@ -13,6 +13,7 @@ import type {
   Expense,
   ExpenseInput,
   MethodInput,
+  MethodKind,
   PaymentMethod,
 } from "../data/models";
 
@@ -27,6 +28,7 @@ interface Store {
   saveMethod: (input: MethodInput, id?: number) => Promise<void>;
   deleteExpense: (id: number) => Promise<void>;
   deleteMethod: (id: number) => Promise<void>;
+  reorderMethods: (kind: MethodKind, ids: readonly number[]) => Promise<void>;
 }
 
 const Context = createContext<Store | null>(null);
@@ -91,6 +93,8 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
           mutate(() => repository.saveMethod(db, input, id)),
         deleteExpense: (id) => mutate(() => repository.deleteExpense(db, id)),
         deleteMethod: (id) => mutate(() => repository.deleteMethod(db, id)),
+        reorderMethods: (kind, ids) =>
+          mutate(() => repository.reorderMethods(db, kind, ids)),
       }}
     >
       {children}

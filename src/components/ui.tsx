@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -11,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../hooks/use-month-pin";
 
@@ -65,7 +66,13 @@ export function Button({
   );
 }
 
-export function Screen({ children }: { children: ReactNode }) {
+export function Screen({
+  children,
+  scrollable = true,
+}: {
+  children: ReactNode;
+  scrollable?: boolean;
+}) {
   const { loading, error, refresh } = useMonthPin();
   return (
     <SafeAreaView style={s.screen} edges={["top", "left", "right"]}>
@@ -84,7 +91,7 @@ export function Screen({ children }: { children: ReactNode }) {
             }}
           />
         </View>
-      ) : (
+      ) : scrollable ? (
         <ScrollView
           contentContainerStyle={s.page}
           showsVerticalScrollIndicator={false}
@@ -92,6 +99,8 @@ export function Screen({ children }: { children: ReactNode }) {
         >
           {children}
         </ScrollView>
+      ) : (
+        children
       )}
     </SafeAreaView>
   );
@@ -151,39 +160,47 @@ export function FormModal({
   onClose: () => void;
   busy?: boolean;
 }) {
+  function close() {
+    if (busy) return;
+    Keyboard.dismiss();
+    onClose();
+  }
+
   return (
-    <Modal
-      animationType="slide"
-      onRequestClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <SafeAreaView style={s.screen}>
-        <View style={s.modalHeader}>
-          <Text style={s.sectionTitle}>{title}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="닫기"
-            disabled={busy}
-            onPress={onClose}
-            style={s.iconButton}
+    <Modal animationType="slide" onRequestClose={close}>
+      <SafeAreaProvider>
+        <SafeAreaView style={s.screen}>
+          <View style={s.modalHeader}>
+            <Text style={[s.sectionTitle, s.flex]}>{title}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="닫기"
+              accessibilityState={{ disabled: busy }}
+              disabled={busy}
+              hitSlop={8}
+              onPress={close}
+              style={({ pressed }) => [
+                s.modalCloseButton,
+                (pressed || busy) && { opacity: 0.5 },
+              ]}
+            >
+              <Ionicons name="close" size={26} color={colors.ink} />
+            </Pressable>
+          </View>
+          <KeyboardAvoidingView
+            style={s.flex}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
           >
-            <Ionicons name="close" size={26} color={colors.ink} />
-          </Pressable>
-        </View>
-        <KeyboardAvoidingView
-          style={s.flex}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <ScrollView
-            contentContainerStyle={s.page}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-          >
-            {children}
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+            <ScrollView
+              contentContainerStyle={s.page}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              {children}
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -226,20 +243,23 @@ export function Choice({
   label,
   selected,
   onPress,
+  disabled = false,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
+      accessibilityState={{ checked: selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         s.choice,
         selected && s.choiceActive,
-        pressed && { opacity: 0.7 },
+        (pressed || disabled) && { opacity: 0.7 },
       ]}
     >
       <Ionicons
@@ -363,10 +383,13 @@ export const s = StyleSheet.create({
     justifyContent: "space-between",
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
+    gap: 12,
+    flexShrink: 0,
   },
-  iconButton: {
-    width: 44,
-    height: 44,
+  modalCloseButton: {
+    width: 48,
+    height: 48,
+    flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
   },

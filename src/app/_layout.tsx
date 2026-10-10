@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SQLiteProvider } from "expo-sqlite";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { initializeDatabase } from "../data/database";
 import { MonthPinProvider } from "../hooks/use-month-pin";
 import { Button, colors, s } from "../components/ui";
@@ -52,29 +53,31 @@ class StorageBoundary extends Component<
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <StorageBoundary>
-        <Suspense
-          fallback={
-            <View style={[s.screen, s.center]}>
-              <ActivityIndicator color={colors.blue} />
-            </View>
-          }
-        >
-          <SQLiteProvider
-            databaseName="month-pin.db"
-            onInit={initializeDatabase}
-            useSuspense
+    <GestureHandlerRootView style={s.flex}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <StorageBoundary>
+          <Suspense
+            fallback={
+              <View style={[s.screen, s.center]}>
+                <ActivityIndicator color={colors.blue} />
+              </View>
+            }
           >
-            <MonthPinProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="(tabs)" />
-              </Stack>
-            </MonthPinProvider>
-          </SQLiteProvider>
-        </Suspense>
-      </StorageBoundary>
-    </SafeAreaProvider>
+            <SQLiteProvider
+              databaseName="month-pin.db"
+              onInit={initializeDatabase}
+              useSuspense
+            >
+              <MonthPinProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="(tabs)" />
+                </Stack>
+              </MonthPinProvider>
+            </SQLiteProvider>
+          </Suspense>
+        </StorageBoundary>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
