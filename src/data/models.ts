@@ -1,4 +1,4 @@
-export type MethodKind = 'bank' | 'card';
+export type MethodKind = "bank" | "card";
 
 export interface PaymentMethod {
   id: number;
@@ -17,5 +17,5 @@ export interface Expense {
   methodId: number | null;
 }
 
-export type MethodInput = Omit<PaymentMethod, 'id'>;
-export type ExpenseInput = Omit<Expense, 'id'>;
+export type MethodInput = Omit<PaymentMethod, "id">;
+export type ExpenseInput = Omit<Expense, "id">;
