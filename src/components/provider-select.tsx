@@ -47,7 +47,7 @@ export function ProviderSelect({
           (pressed || disabled) && { opacity: 0.6 },
         ]}
       >
-        <ProviderIcon code={value} kind={kind} />
+        <ProviderIcon code={value} />
         <Text style={[styles.value, !selected && { color: colors.muted }]}>
           {selected?.name ??
             `${kind === "bank" ? "은행을" : "카드사를"} 선택해 주세요`}
@@ -76,7 +76,7 @@ export function ProviderSelect({
                 pressed && { opacity: 0.6 },
               ]}
             >
-              <ProviderIcon code={provider.code} kind={kind} />
+              <ProviderIcon code={provider.code} />
               <Text
                 style={[
                   s.body,

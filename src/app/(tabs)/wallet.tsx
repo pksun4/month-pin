@@ -1,23 +1,38 @@
-import { useMemo, useRef, useState } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
-import DraggableFlatList, {
-  ScaleDecorator,
-} from "react-native-draggable-flatlist";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Alert, Text, View } from "react-native";
+import { useFocusEffect } from "expo-router";
+import { ReorderableList } from "../../components/reorderable-list";
 import type { MethodKind, PaymentMethod } from "../../data/models";
+import {
+  METHOD_KINDS,
+  METHOD_SORT_OPTIONS,
+  type MethodSortCode,
+} from "../../data/method-types";
 import { useMonthPin } from "../../hooks/use-month-pin";
 import {
   methodLabel,
+  cardTypeLabel,
   money,
   monthlyTotal,
+  paymentMethodsTotal,
   relatedExpenses,
+  sortPaymentMethods,
 } from "../../utils/expenses";
 import { ExpenseRow } from "../../components/expense-row";
 import { MethodForm } from "../../components/method-form";
 import { ProviderIcon } from "../../components/provider-icon";
 import { PaymentMethodRow } from "../../components/payment-method-row";
+import { SelectPopover } from "../../components/select-popover";
+import {
+  ListTabs,
+  ListSummary,
+  ListToolbar,
+  ListReorderButton,
+  RegisterButton,
+  listStyles,
+} from "../../components/list-controls";
 import {
   Button,
-  Choice,
   Empty,
   FormModal,
   Header,
@@ -36,14 +51,24 @@ export default function WalletScreen() {
     null,
   );
   const [kind, setKind] = useState<MethodKind>("bank");
+  const [sortCode, setSortCode] = useState<MethodSortCode>("provider");
   const [form, setForm] = useState<{ method?: PaymentMethod } | null>(null);
   const [selected, setSelected] = useState<PaymentMethod | null>(null);
   const visible = useMemo(
     () => methods.filter((method) => method.kind === kind),
     [methods, kind],
   );
-  const displayed = pendingOrder ?? visible;
+  const sortedMethods = useMemo(
+    () => sortPaymentMethods(visible, sortCode, methods, expenses),
+    [visible, sortCode, methods, expenses],
+  );
+  const displayed = pendingOrder ?? sortedMethods;
   const locked = busy || dragging || savingOrder;
+  const kindLabel = METHOD_KINDS.find((option) => option.code === kind)?.label;
+  const summaryTotal = useMemo(
+    () => paymentMethodsTotal(visible, methods, expenses),
+    [visible, methods, expenses],
+  );
   const related = selected ? relatedExpenses(selected, methods, expenses) : [];
   const linkedCards =
     selected?.kind === "bank"
@@ -51,6 +76,15 @@ export default function WalletScreen() {
           (method) => method.kind === "card" && method.bankId === selected.id,
         )
       : [];
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setReordering(false);
+        setDragging(false);
+      };
+    }, []),
+  );
 
   function changeKind(nextKind: MethodKind) {
     if (locked) return;
@@ -111,12 +145,13 @@ export default function WalletScreen() {
   return (
     <>
       <Screen scrollable={false}>
-        <DraggableFlatList
+        <ReorderableList
           key={kind}
+          reordering={reordering}
           data={displayed}
           keyExtractor={(method) => `method-${method.id}`}
           containerStyle={s.flex}
-          contentContainerStyle={[s.page, { gap: 0 }]}
+          contentContainerStyle={[s.page, listStyles.page]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           activationDistance={6}
@@ -128,44 +163,42 @@ export default function WalletScreen() {
             if (from !== to) void saveOrder(data);
           }}
           renderItem={({ item: method, drag, isActive, getIndex }) => (
-            <ScaleDecorator activeScale={1.02}>
-              <PaymentMethodRow
-                method={method}
-                total={monthlyTotal(relatedExpenses(method, methods, expenses))}
-                bank={methods.find((bank) => bank.id === method.bankId)}
-                onPress={() => setSelected(method)}
-                reorder={
-                  reordering
-                    ? {
-                        active: isActive,
-                        busy: busy || savingOrder || (dragging && !isActive),
-                        onDrag: () => {
-                          if (!locked && !savingOrderRef.current) drag();
-                        },
-                        canMoveUp: (getIndex() ?? 0) > 0,
-                        canMoveDown:
-                          (getIndex() ?? displayed.length - 1) <
-                          displayed.length - 1,
-                        onAccessibilityMove: (direction) => {
-                          const index = getIndex();
-                          if (index !== undefined)
-                            moveForAccessibility(index, direction);
-                        },
-                      }
-                    : undefined
-                }
-              />
-            </ScaleDecorator>
+            <PaymentMethodRow
+              method={method}
+              total={monthlyTotal(relatedExpenses(method, methods, expenses))}
+              bank={methods.find((bank) => bank.id === method.bankId)}
+              onPress={() => setSelected(method)}
+              reorder={
+                reordering
+                  ? {
+                      active: isActive,
+                      busy: busy || savingOrder || (dragging && !isActive),
+                      onDrag: () => {
+                        if (!locked && !savingOrderRef.current) drag();
+                      },
+                      canMoveUp: (getIndex() ?? 0) > 0,
+                      canMoveDown:
+                        (getIndex() ?? displayed.length - 1) <
+                        displayed.length - 1,
+                      onAccessibilityMove: (direction) => {
+                        const index = getIndex();
+                        if (index !== undefined)
+                          moveForAccessibility(index, direction);
+                      },
+                    }
+                  : undefined
+              }
+            />
           )}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListHeaderComponent={
-            <View style={{ gap: 20, marginBottom: 20 }}>
+            <View style={listStyles.header}>
               <Header
                 title="결제수단"
                 description="고정비가 나가는 통장과 카드"
                 action={
-                  <Button
-                    label="+ 등록"
+                  <RegisterButton
+                    accessibilityLabel="결제수단 등록"
                     disabled={locked}
                     onPress={() => {
                       setReordering(false);
@@ -174,52 +207,48 @@ export default function WalletScreen() {
                   />
                 }
               />
-              <View style={s.row}>
-                <View style={s.flex}>
-                  <Choice
-                    label={`통장 ${methods.filter((method) => method.kind === "bank").length}`}
-                    selected={kind === "bank"}
-                    disabled={locked}
-                    onPress={() => changeKind("bank")}
-                  />
-                </View>
-                <View style={s.flex}>
-                  <Choice
-                    label={`카드 ${methods.filter((method) => method.kind === "card").length}`}
-                    selected={kind === "card"}
-                    disabled={locked}
-                    onPress={() => changeKind("card")}
-                  />
-                </View>
-              </View>
-              {(visible.length > 1 || reordering) && (
-                <View style={s.between}>
-                  <Text
-                    accessibilityLiveRegion="polite"
-                    style={[s.caption, s.flex, { marginTop: 0 }]}
-                  >
-                    {reordering
+              <ListTabs
+                label="결제수단 종류"
+                options={METHOD_KINDS}
+                value={kind}
+                onChange={changeKind}
+                disabled={locked}
+              />
+              <ListSummary
+                countLabel={`${kindLabel} ${visible.length}개`}
+                amount={summaryTotal}
+              />
+              {visible.length > 0 && (
+                <ListToolbar
+                  hint={
+                    reordering
                       ? savingOrder
                         ? "순서를 저장하고 있어요…"
-                        : "오른쪽 손잡이를 잡고 이동하세요."
-                      : `${kind === "bank" ? "통장" : "카드"} ${visible.length}개`}
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: locked }}
-                    disabled={locked}
-                    onPress={() => setReordering((value) => !value)}
-                    style={({ pressed }) => ({
-                      minHeight: 44,
-                      justifyContent: "center",
-                      opacity: pressed || locked ? 0.5 : 1,
-                    })}
-                  >
-                    <Text style={s.textLink}>
-                      {reordering ? "완료" : "순서 변경"}
-                    </Text>
-                  </Pressable>
-                </View>
+                        : "손잡이를 잡고 이동하세요."
+                      : undefined
+                  }
+                >
+                  {!reordering && (
+                    <SelectPopover
+                      label="결제수단 정렬 선택"
+                      options={METHOD_SORT_OPTIONS}
+                      value={sortCode}
+                      onChange={setSortCode}
+                      disabled={locked}
+                      alignment="end"
+                    />
+                  )}
+                  {(visible.length > 1 || reordering) && (
+                    <ListReorderButton
+                      active={reordering}
+                      disabled={locked}
+                      onPress={() => {
+                        if (!reordering) setSortCode("custom");
+                        setReordering((value) => !value);
+                      }}
+                    />
+                  )}
+                </ListToolbar>
               )}
             </View>
           }
@@ -242,10 +271,14 @@ export default function WalletScreen() {
             />
           }
           ListFooterComponent={
-            <Text style={[s.caption, { marginTop: 20 }]}>
-              통장별 합계에는 해당 통장에서 대금을 내는 카드의 고정비도
-              포함돼요. 홈의 전체 합계는 각 고정비를 한 번씩 계산해요.
-            </Text>
+            <View style={listStyles.footer}>
+              <Text style={listStyles.footerText}>
+                {kind === "bank"
+                  ? "통장별 합계에는 해당 통장에서 대금을 내는 카드의 고정비도 포함돼요."
+                  : "카드 합계에는 카드로 결제하는 고정비만 포함돼요."}{" "}
+                고정 금액만 합산하며 변동 항목은 제외돼요.
+              </Text>
+            </View>
           }
         />
       </Screen>
@@ -276,10 +309,7 @@ export default function WalletScreen() {
               <>
                 <View style={s.card}>
                   <View style={s.row}>
-                    <ProviderIcon
-                      code={selected.providerCode}
-                      kind={selected.kind}
-                    />
+                    <ProviderIcon code={selected.providerCode} />
                     <Text style={s.body}>{selected.provider}</Text>
                   </View>
                   <Text style={s.title}>{selected.name}</Text>
@@ -287,34 +317,42 @@ export default function WalletScreen() {
                     연결된 월 고정비 · {related.length}개
                   </Text>
                   <Text style={s.title}>{money(monthlyTotal(related))}</Text>
+                  <Text style={s.caption}>
+                    고정 금액 합계이며 변동 항목은 제외돼요.
+                  </Text>
                   {selected.kind === "card" && (
                     <>
                       <Text style={s.body}>
-                        출금 통장:{" "}
+                        카드 종류: {cardTypeLabel(selected)}
+                      </Text>
+                      <Text style={s.body}>
+                        {selected.cardTypeCode === "debit"
+                          ? "연결 통장"
+                          : "출금 통장"}
+                        :{" "}
                         {methodLabel(
                           methods.find((bank) => bank.id === selected.bankId),
                         )}
                       </Text>
-                      <Text style={s.body}>
-                        대금 출금일:{" "}
-                        {selected.settlementDay
-                          ? `매월 ${selected.settlementDay}일`
-                          : "미지정"}
-                      </Text>
+                      {selected.cardTypeCode !== "debit" && (
+                        <Text style={s.body}>
+                          대금 출금일:{" "}
+                          {selected.settlementDay
+                            ? `매월 ${selected.settlementDay}일`
+                            : "미지정"}
+                        </Text>
+                      )}
                     </>
                   )}
                 </View>
                 {linkedCards.length > 0 && (
                   <View style={s.card}>
-                    <Text style={s.sectionTitle}>
-                      이 통장에서 출금되는 카드
-                    </Text>
+                    <Text style={s.sectionTitle}>이 통장에 연결된 카드</Text>
                     {linkedCards.map((card) => (
                       <Text style={s.body} key={card.id}>
-                        {methodLabel(card)} ·{" "}
-                        {card.settlementDay
-                          ? `${card.settlementDay}일 출금`
-                          : "출금일 미지정"}
+                        {methodLabel(card)} · {cardTypeLabel(card)}
+                        {card.cardTypeCode !== "debit" &&
+                          ` · ${card.settlementDay ? `${card.settlementDay}일 출금` : "출금일 미지정"}`}
                       </Text>
                     ))}
                   </View>

@@ -2,6 +2,11 @@ import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import type { MethodKind, PaymentMethod } from "../data/models";
 import { getProvider, type ProviderCode } from "../data/providers";
+import {
+  CARD_TYPES,
+  METHOD_KINDS,
+  type CardTypeCode,
+} from "../data/method-types";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { methodLabel, parseDay } from "../utils/expenses";
 import { Button, Choice, Field, s } from "./ui";
@@ -23,6 +28,9 @@ export function MethodForm({
   );
   const [name, setName] = useState(method?.name ?? "");
   const [bankId, setBankId] = useState<number | null>(method?.bankId ?? null);
+  const [cardTypeCode, setCardTypeCode] = useState<CardTypeCode | null>(
+    method?.cardTypeCode ?? null,
+  );
   const [day, setDay] = useState(
     method?.settlementDay ? String(method.settlementDay) : "",
   );
@@ -49,8 +57,13 @@ export function MethodForm({
       );
       return;
     }
-    const settlementDay = kind === "card" && day.trim() ? parseDay(day) : null;
-    if (kind === "card" && day.trim() && settlementDay === null) {
+    if (kind === "card" && cardTypeCode === null) {
+      setError("신용카드 또는 체크카드를 선택해 주세요.");
+      return;
+    }
+    const needsDay = kind === "card" && cardTypeCode === "credit";
+    const settlementDay = needsDay && day.trim() ? parseDay(day) : null;
+    if (needsDay && day.trim() && settlementDay === null) {
       setError("출금일은 1일부터 31일까지 입력해 주세요.");
       return;
     }
@@ -64,6 +77,7 @@ export function MethodForm({
           name: name.trim(),
           bankId: kind === "card" ? bankId : null,
           settlementDay,
+          cardTypeCode: kind === "card" ? cardTypeCode : null,
         },
         method?.id,
       );
@@ -79,20 +93,15 @@ export function MethodForm({
     <>
       {!method && (
         <View style={s.row}>
-          <View style={s.flex}>
-            <Choice
-              label="통장"
-              selected={kind === "bank"}
-              onPress={() => changeKind("bank")}
-            />
-          </View>
-          <View style={s.flex}>
-            <Choice
-              label="카드"
-              selected={kind === "card"}
-              onPress={() => changeKind("card")}
-            />
-          </View>
+          {METHOD_KINDS.map((option) => (
+            <View key={option.code} style={s.flex}>
+              <Choice
+                label={option.label}
+                selected={kind === option.code}
+                onPress={() => changeKind(option.code)}
+              />
+            </View>
+          ))}
         </View>
       )}
       <ProviderSelect
@@ -121,8 +130,38 @@ export function MethodForm({
       />
       {kind === "card" && (
         <>
+          <View
+            accessibilityRole="radiogroup"
+            accessibilityLabel="카드 종류"
+            style={s.choices}
+          >
+            <Text style={s.fieldLabel}>카드 종류</Text>
+            <View style={s.row}>
+              {CARD_TYPES.map((type) => (
+                <View key={type.code} style={s.flex}>
+                  <Choice
+                    label={type.label}
+                    selected={cardTypeCode === type.code}
+                    disabled={busy}
+                    onPress={() => {
+                      setCardTypeCode(type.code);
+                      if (type.code === "debit") setDay("");
+                      setError("");
+                    }}
+                  />
+                </View>
+              ))}
+            </View>
+            {method && method.cardTypeCode === null && (
+              <Text style={s.caption}>기존 카드의 종류를 선택해 주세요.</Text>
+            )}
+          </View>
           <View style={s.choices}>
-            <Text style={s.fieldLabel}>카드 대금 출금 통장 (선택)</Text>
+            <Text style={s.fieldLabel}>
+              {cardTypeCode === "debit"
+                ? "연결 통장 (선택)"
+                : "카드 대금 출금 통장 (선택)"}
+            </Text>
             <Choice
               label="미지정"
               selected={bankId === null}
@@ -142,18 +181,22 @@ export function MethodForm({
               </Text>
             )}
           </View>
-          <Field
-            label="카드 대금 출금일 (선택)"
-            value={day}
-            onChangeText={setDay}
-            placeholder="1 ~ 31"
-            numeric
-            maxLength={2}
-          />
-          <Text style={s.caption}>
-            카드 대금이 통장에서 빠져나가는 날짜예요. 고정비의 카드 승인일과
-            별도로 관리해요.
-          </Text>
+          {cardTypeCode === "credit" && (
+            <>
+              <Field
+                label="카드 대금 출금일 (선택)"
+                value={day}
+                onChangeText={setDay}
+                placeholder="1 ~ 31"
+                numeric
+                maxLength={2}
+              />
+              <Text style={s.caption}>
+                카드 대금이 통장에서 빠져나가는 날짜예요. 고정비의 카드 승인일과
+                별도로 관리해요.
+              </Text>
+            </>
+          )}
         </>
       )}
       {error ? (

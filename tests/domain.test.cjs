@@ -55,13 +55,181 @@ function sqliteAdapter(path = ":memory:") {
   };
 }
 
+function withFixedType(rows) {
+  const ids = rows.map((row) => row.id).sort((a, b) => a - b);
+  return rows.map((row) =>
+    Object.assign(Object.create(Object.getPrototypeOf(row)), row, {
+      amountTypeCode: "fixed",
+      categoryCode: null,
+      sortOrder: ids.indexOf(row.id),
+    }),
+  );
+}
+
+async function readPreCardTypeMethods(db) {
+  return db.getAllAsync(`SELECT m.id, m.kind, m.providerCode,
+    COALESCE(p.name, m.legacyProvider) AS provider,
+    m.name, m.bankId, m.settlementDay, NULL AS cardTypeCode, m.sortOrder
+    FROM payment_methods m
+    LEFT JOIN payment_providers p ON p.code = m.providerCode AND p.kind = m.kind
+    ORDER BY m.sortOrder, m.id DESC`);
+}
+
 const bankInput = {
   kind: "bank",
   providerCode: "bank_kb",
   name: "급여 통장",
   bankId: null,
   settlementDay: null,
+  cardTypeCode: null,
 };
+
+test("payment method summaries include linked cards once and exclude variable or unassigned expenses", () => {
+  const bank = { id: 1, kind: "bank" };
+  const secondBank = { id: 2, kind: "bank" };
+  const card = { id: 3, kind: "card", bankId: 1 };
+  const unlinkedCard = { id: 4, kind: "card", bankId: null };
+  const methods = [bank, secondBank, card, unlinkedCard];
+  const expenses = [
+    { id: 10, methodId: 1, amount: 100000 },
+    { id: 11, methodId: 2, amount: 300000 },
+    { id: 12, methodId: 3, amount: 20000 },
+    { id: 13, methodId: 4, amount: 40000 },
+    { id: 14, methodId: 1, amount: null },
+    { id: 15, methodId: null, amount: 50000 },
+  ];
+  assert.equal(
+    domain.paymentMethodsTotal([bank, secondBank], methods, expenses),
+    420000,
+  );
+  assert.equal(
+    domain.paymentMethodsTotal([card, unlinkedCard], methods, expenses),
+    60000,
+  );
+  assert.equal(
+    domain.paymentMethodsTotal([bank, card], methods, expenses),
+    120000,
+  );
+  assert.equal(domain.paymentMethodsTotal(methods, methods, expenses), 460000);
+  assert.equal(domain.paymentMethodsTotal([], methods, expenses), 0);
+});
+
+test("institution sorting groups providers before nicknames and uses Korean brand names", () => {
+  const methods = [
+    { id: 5, providerCode: "bank_nh", name: "가", sortOrder: 0 },
+    { id: 4, providerCode: "bank_kb", name: "나", sortOrder: 1 },
+    { id: 3, providerCode: "bank_woori", name: "가", sortOrder: 2 },
+    { id: 2, providerCode: "bank_ibk", name: "가", sortOrder: 3 },
+    { id: 1, providerCode: "bank_kb", name: "가", sortOrder: 4 },
+    { id: 6, providerCode: "bank_sc", name: "가", sortOrder: 5 },
+  ];
+  const original = structuredClone(methods);
+  assert.deepEqual(
+    domain
+      .sortPaymentMethods(methods, "provider", methods, [])
+      .map((m) => m.id),
+    [1, 4, 2, 5, 3, 6],
+  );
+  assert.deepEqual(methods, original);
+  const cards = [
+    { id: 10, providerCode: "card_shinhan", name: "가" },
+    { id: 11, providerCode: "card_bc", name: "가" },
+    { id: 12, providerCode: "card_kb", name: "나" },
+    { id: 13, providerCode: "card_kb", name: "가" },
+    { id: 14, providerCode: "card_nh", name: "가" },
+  ];
+  assert.deepEqual(
+    domain.sortPaymentMethods(cards, "provider", cards, []).map((m) => m.id),
+    [13, 12, 14, 11, 10],
+  );
+  const legacy = [
+    { id: 20, providerCode: null, provider: "하나은행", name: "가" },
+    { id: 21, providerCode: null, provider: "지역은행", name: "가" },
+  ];
+  assert.deepEqual(
+    domain.sortPaymentMethods(legacy, "provider", legacy, []).map((m) => m.id),
+    [21, 20],
+  );
+});
+
+test("registration and custom method sorting remain independent with duplicate names", () => {
+  const methods = [
+    { id: 3, providerCode: "bank_woori", name: "통장", sortOrder: 1 },
+    { id: 2, providerCode: "bank_woori", name: "통장", sortOrder: 0 },
+    { id: 1, providerCode: "bank_woori", name: "통장", sortOrder: 2 },
+  ];
+  for (const order of ["registered", "provider", "amount"])
+    assert.deepEqual(
+      domain.sortPaymentMethods(methods, order, methods, []).map((m) => m.id),
+      [1, 2, 3],
+    );
+  assert.deepEqual(
+    domain.sortPaymentMethods(methods, "custom", methods, []).map((m) => m.id),
+    [2, 3, 1],
+  );
+  for (const order of ["provider", "registered", "amount", "custom"])
+    assert.deepEqual(domain.sortPaymentMethods([], order, [], []), []);
+});
+
+test("method fixed-expense sorting includes linked cards and handles zero totals and ties", () => {
+  const methods = [
+    { id: 1, kind: "bank", providerCode: "bank_kb", name: "가" },
+    { id: 2, kind: "bank", providerCode: "bank_woori", name: "가" },
+    { id: 3, kind: "bank", providerCode: "bank_shinhan", name: "가" },
+    { id: 4, kind: "bank", providerCode: "bank_woori", name: "나" },
+    {
+      id: 5,
+      kind: "card",
+      cardTypeCode: "credit",
+      providerCode: "card_shinhan",
+      name: "가",
+      bankId: 2,
+    },
+    { id: 6, kind: "card", providerCode: "card_kb", name: "가", bankId: null },
+  ];
+  const expenses = [
+    { id: 10, methodId: 1, amount: 30000 },
+    { id: 11, methodId: 2, amount: 10000 },
+    { id: 12, methodId: 5, amount: 50000 },
+    { id: 13, methodId: 6, amount: 30000 },
+    { id: 14, methodId: 3, amount: null },
+    { id: 15, methodId: null, amount: 999999 },
+  ];
+  assert.deepEqual(
+    domain
+      .sortPaymentMethods(
+        methods.filter((m) => m.kind === "bank"),
+        "amount",
+        methods,
+        expenses,
+      )
+      .map((m) => m.id),
+    [2, 1, 3, 4],
+  );
+  assert.deepEqual(
+    domain
+      .sortPaymentMethods(
+        methods.filter((m) => m.kind === "card"),
+        "amount",
+        methods,
+        expenses,
+      )
+      .map((m) => m.id),
+    [5, 6],
+  );
+  expenses.find((e) => e.methodId === 5).amount = 30000;
+  assert.deepEqual(
+    domain
+      .sortPaymentMethods(
+        methods.filter((m) => m.kind === "card"),
+        "amount",
+        methods,
+        expenses,
+      )
+      .map((m) => m.id),
+    [6, 5],
+  );
+});
 
 test("month end, leap year, today and year rollover schedules", () => {
   const cases = [
@@ -89,6 +257,118 @@ test("amount and day validation rejects invalid inputs", () => {
     assert.equal(domain.parseDay(value), null);
 });
 
+test("amount masking supports typing, editing and pasting while preserving the saved number", async () => {
+  const cases = [
+    ["", "1", "1"],
+    ["999", "9999", "9,999"],
+    ["1,000", "1,0000", "10,000"],
+    ["17,000", "17,00", "1,700"],
+    ["12,345", "12345", "1,345"],
+    ["1,234,567", "1,234567", "123,567"],
+    ["17,000", "", ""],
+    ["", "00017000", "17,000"],
+    ["", " 999,999,999 ", "999,999,999"],
+    ["17,000", "-500", "17,000"],
+    ["17,000", "1.5", "17,000"],
+    ["17,000", "abc", "17,000"],
+  ];
+  for (const [previous, input, expected] of cases)
+    assert.equal(domain.formatAmountInput(input, previous), expected);
+  assert.equal(
+    domain.parseAmount(domain.formatAmountInput("1000000000")),
+    null,
+  );
+
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const display = domain.formatAmountInput("175000");
+    await repository.saveExpense(db, {
+      name: "통신비",
+      amountTypeCode: "fixed",
+      amount: domain.parseAmount(display),
+      chargeDay: 15,
+      methodId: null,
+    });
+    const saved = (await repository.readExpenses(db))[0];
+    assert.equal(saved.amount, 175000);
+    assert.equal(typeof saved.amount, "number");
+    assert.equal(domain.formatAmountInput(String(saved.amount)), "175,000");
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("expense display orders larger amounts first, Korean names on ties and variable items last", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    for (const [name, amount, chargeDay] of [
+      ["통신비", 50000, 1],
+      ["월세", 750000, 20],
+      ["구독료", 50000, 25],
+      ["가스요금", null, 30],
+      ["관리비", null, 2],
+      ["인터넷", 30000, 3],
+    ]) {
+      await repository.saveExpense(db, {
+        name,
+        amount,
+        chargeDay,
+        methodId: null,
+        amountTypeCode: amount === null ? "variable" : "fixed",
+      });
+    }
+    const original = await repository.readExpenses(db);
+    const snapshot = original.map((item) => ({ ...item }));
+    const sorted = domain.sortExpensesByAmount(original);
+    assert.deepEqual(
+      sorted.map((item) => item.name),
+      ["월세", "구독료", "통신비", "인터넷", "가스요금", "관리비"],
+    );
+    assert.deepEqual(
+      original.map((item) => ({ ...item })),
+      snapshot,
+    );
+    assert.deepEqual(await repository.readExpenses(db), original);
+    const telecom = original.find((item) => item.name === "통신비");
+    await repository.saveExpense(
+      db,
+      {
+        name: telecom.name,
+        amountTypeCode: "fixed",
+        amount: 800000,
+        chargeDay: telecom.chargeDay,
+        methodId: null,
+      },
+      telecom.id,
+    );
+    assert.equal(
+      domain.sortExpensesByAmount(await repository.readExpenses(db))[0].id,
+      telecom.id,
+    );
+    assert.deepEqual(domain.sortExpensesByAmount([]), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("payment method choices group banks before cards while preserving each saved drag order", () => {
+  const methods = [
+    { id: 4, kind: "card", sortOrder: 0 },
+    { id: 3, kind: "bank", sortOrder: 0 },
+    { id: 2, kind: "card", sortOrder: 1 },
+    { id: 1, kind: "bank", sortOrder: 1 },
+  ];
+  const snapshot = structuredClone(methods);
+  assert.deepEqual(
+    domain.paymentMethodsByKind(methods).map((method) => method.id),
+    [3, 1, 4, 2],
+  );
+  assert.deepEqual(methods, snapshot);
+  assert.deepEqual(domain.paymentMethodsByKind([]), []);
+});
+
 test("CRUD keeps bank/card links and counts each expense once in the total", async () => {
   const db = sqliteAdapter();
   try {
@@ -97,6 +377,7 @@ test("CRUD keeps bank/card links and counts each expense once in the total", asy
     const bank = (await repository.readMethods(db))[0];
     await repository.saveMethod(db, {
       kind: "card",
+      cardTypeCode: "credit",
       providerCode: "card_samsung",
       name: "생활비 카드",
       bankId: bank.id,
@@ -105,12 +386,14 @@ test("CRUD keeps bank/card links and counts each expense once in the total", asy
     const card = (await repository.readMethods(db))[0];
     await repository.saveExpense(db, {
       name: "월세",
+      amountTypeCode: "fixed",
       amount: 750000,
       chargeDay: 1,
       methodId: bank.id,
     });
     await repository.saveExpense(db, {
       name: "넷플릭스",
+      amountTypeCode: "fixed",
       amount: 17000,
       chargeDay: 20,
       methodId: card.id,
@@ -131,6 +414,7 @@ test("CRUD keeps bank/card links and counts each expense once in the total", asy
       db,
       {
         name: "넷플릭스 '프리미엄'",
+        amountTypeCode: "fixed",
         amount: 20000,
         chargeDay: 21,
         methodId: card.id,
@@ -173,6 +457,7 @@ test("data persists after reopening and repeated initialization", async () => {
     await repository.saveMethod(db, bankInput);
     await repository.saveExpense(db, {
       name: "통신비",
+      amountTypeCode: "fixed",
       amount: 50000,
       chargeDay: 15,
       methodId: 1,
@@ -185,6 +470,7 @@ test("data persists after reopening and repeated initialization", async () => {
     await assert.rejects(
       repository.saveExpense(db, {
         name: "잘못된 날짜",
+        amountTypeCode: "fixed",
         amount: 500,
         chargeDay: 32,
         methodId: null,
@@ -193,6 +479,7 @@ test("data persists after reopening and repeated initialization", async () => {
     await assert.rejects(
       repository.saveMethod(db, {
         kind: "card",
+        cardTypeCode: "credit",
         providerCode: "card_samsung",
         name: "카드",
         bankId: 999,
@@ -260,7 +547,10 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.equal(methods.find((m) => m.id === 2).settlementDay, 25);
     assert.equal(methods.find((m) => m.id === 3).providerCode, null);
     assert.equal(methods.find((m) => m.id === 3).provider, "직접 작성한 은행");
-    assert.deepEqual(await repository.readExpenses(db), originalExpenses);
+    assert.deepEqual(
+      await repository.readExpenses(db),
+      withFixedType(originalExpenses),
+    );
     assert.equal(
       domain.monthlyTotal(
         domain.relatedExpenses(
@@ -274,14 +564,17 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      3,
+      7,
     );
 
     db.sqlite.close();
     db = sqliteAdapter(path);
     await repository.initializeDatabase(db);
     assert.deepEqual(await repository.readMethods(db), methods);
-    assert.deepEqual(await repository.readExpenses(db), originalExpenses);
+    assert.deepEqual(
+      await repository.readExpenses(db),
+      withFixedType(originalExpenses),
+    );
 
     // An unsupported legacy label can be replaced only by a catalog selection.
     await repository.saveMethod(
@@ -361,9 +654,12 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      3,
+      7,
     );
-    assert.deepEqual(await repository.readExpenses(db), originalExpenses);
+    assert.deepEqual(
+      await repository.readExpenses(db),
+      withFixedType(originalExpenses),
+    );
   } finally {
     db.sqlite.close();
   }
@@ -421,6 +717,7 @@ test("only supported codes of the matching kind are saved; display names are cen
         {
           ...bankInput,
           kind: "card",
+          cardTypeCode: "credit",
           providerCode: "card_samsung",
         },
         bank.id,
@@ -467,6 +764,7 @@ test("method order persists independently by kind; edits and additions preserve 
     for (const name of ["X", "Y"])
       await repository.saveMethod(db, {
         kind: "card",
+        cardTypeCode: "credit",
         providerCode: "card_samsung",
         name,
         bankId: a,
@@ -475,6 +773,7 @@ test("method order persists independently by kind; edits and additions preserve 
     const [x, y] = await idsOf("card");
     await repository.saveExpense(db, {
       name: "구독",
+      amountTypeCode: "fixed",
       amount: 17000,
       chargeDay: 20,
       methodId: x,
@@ -529,6 +828,7 @@ test("invalid order and failed writes leave the whole previous order intact", as
     const ids = banks.map((m) => m.id);
     await repository.saveMethod(db, {
       kind: "card",
+      cardTypeCode: "credit",
       providerCode: "card_samsung",
       name: "X",
       bankId: null,
@@ -606,6 +906,798 @@ const V2_SCHEMA = `
   CREATE INDEX expenses_method_idx ON expenses(methodId);
   PRAGMA user_version = 2;
 `;
+
+const V3_SCHEMA = `${V2_SCHEMA}
+  ALTER TABLE payment_methods ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0 CHECK (sortOrder >= 0);
+  CREATE INDEX methods_order_idx ON payment_methods(kind, sortOrder, id);
+  PRAGMA user_version = 3;
+`;
+
+const V4_SCHEMA = `${V3_SCHEMA}
+  DROP TABLE expenses;
+  CREATE TABLE expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 60),
+    amountTypeCode TEXT NOT NULL CHECK (amountTypeCode IN ('fixed', 'variable')),
+    amount INTEGER,
+    chargeDay INTEGER NOT NULL CHECK (chargeDay BETWEEN 1 AND 31),
+    methodId INTEGER REFERENCES payment_methods(id) ON DELETE SET NULL,
+    CHECK ((amountTypeCode = 'fixed' AND amount IS NOT NULL AND typeof(amount) = 'integer' AND amount BETWEEN 1 AND 999999999)
+      OR (amountTypeCode = 'variable' AND amount IS NULL))
+  );
+  CREATE INDEX expenses_method_idx ON expenses(methodId);
+  PRAGMA user_version = 4;
+`;
+
+test("card types persist and credit/debit conversion preserves links, totals and custom order", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-card-types-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    const creditInput = {
+      kind: "card",
+      providerCode: "card_samsung",
+      cardTypeCode: "credit",
+      name: "생활비 신용",
+      bankId: bank.id,
+      settlementDay: 25,
+    };
+    await repository.saveMethod(db, creditInput);
+    const credit = (await repository.readMethods(db)).find(
+      (m) => m.kind === "card",
+    );
+    await repository.saveMethod(db, {
+      ...creditInput,
+      name: "생활비 체크",
+      cardTypeCode: "debit",
+      settlementDay: null,
+    });
+    const debit = (await repository.readMethods(db)).find(
+      (m) => m.cardTypeCode === "debit",
+    );
+    await repository.reorderMethods(db, "card", [debit.id, credit.id]);
+    await repository.saveExpense(db, {
+      name: "구독",
+      amountTypeCode: "fixed",
+      categoryCode: "subscription",
+      amount: 17000,
+      chargeDay: 15,
+      methodId: credit.id,
+    });
+    const expenses = await repository.readExpenses(db);
+    assert.equal(domain.cardTypeLabel(credit), "신용카드");
+    assert.equal(domain.cardTypeLabel(debit), "체크카드");
+    assert.equal(domain.cardTypeLabel({ cardTypeCode: null }), "종류 미지정");
+    assert.equal(
+      domain.cardWithdrawalLabel(credit, bank),
+      "급여 통장 · 25일 출금",
+    );
+    assert.equal(domain.cardWithdrawalLabel(debit, bank), "급여 통장");
+    assert.equal(domain.cardWithdrawalLabel(debit), "연결 통장 미지정");
+    await repository.saveMethod(
+      db,
+      {
+        ...creditInput,
+        cardTypeCode: "debit",
+        settlementDay: null,
+      },
+      credit.id,
+    );
+    let methods = await repository.readMethods(db);
+    assert.equal(methods.find((m) => m.id === credit.id).cardTypeCode, "debit");
+    assert.equal(methods.find((m) => m.id === credit.id).settlementDay, null);
+    assert.equal(methods.find((m) => m.id === credit.id).bankId, bank.id);
+    assert.deepEqual(
+      methods.filter((m) => m.kind === "card").map((m) => m.id),
+      [debit.id, credit.id],
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.equal(domain.paymentMethodsTotal([bank], methods, expenses), 17000);
+    await repository.saveMethod(
+      db,
+      { ...creditInput, settlementDay: 31 },
+      credit.id,
+    );
+    methods = await repository.readMethods(db);
+    assert.equal(
+      methods.find((m) => m.id === credit.id).cardTypeCode,
+      "credit",
+    );
+    assert.equal(methods.find((m) => m.id === credit.id).settlementDay, 31);
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true });
+  }
+});
+
+test("card type codes and incompatible settlement dates are validated in repository and SQLite", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const before = await repository.readMethods(db);
+    const cardInput = {
+      kind: "card",
+      providerCode: "card_samsung",
+      name: "카드",
+      bankId: before[0].id,
+      settlementDay: null,
+    };
+    for (const cardTypeCode of [
+      null,
+      undefined,
+      "",
+      "check",
+      "unknown",
+      "CREDIT",
+    ])
+      await assert.rejects(
+        repository.saveMethod(db, { ...cardInput, cardTypeCode }),
+        /신용카드 또는 체크카드/,
+      );
+    await assert.rejects(
+      repository.saveMethod(db, { ...bankInput, cardTypeCode: "credit" }),
+      /통장에는 카드 종류/,
+    );
+    await assert.rejects(
+      repository.saveMethod(db, {
+        ...cardInput,
+        cardTypeCode: "debit",
+        settlementDay: 25,
+      }),
+      /체크카드에는 대금 출금일/,
+    );
+    for (const [kind, provider, type, day] of [
+      ["bank", "bank_kb", "credit", null],
+      ["card", "card_samsung", "check", null],
+      ["card", "card_samsung", "debit", 25],
+    ])
+      await assert.rejects(
+        db.runAsync(
+          "INSERT INTO payment_methods (kind, providerCode, name, cardTypeCode, settlementDay) VALUES (?, ?, '잘못된 카드', ?, ?)",
+          kind,
+          provider,
+          type,
+          day,
+        ),
+      );
+    assert.deepEqual(await repository.readMethods(db), before);
+    await repository.saveMethod(db, { ...cardInput, cardTypeCode: "debit" });
+    const debit = (await repository.readMethods(db)).find(
+      (m) => m.kind === "card",
+    );
+    await assert.rejects(
+      db.runAsync(
+        "UPDATE payment_methods SET settlementDay = 25 WHERE id = ?",
+        debit.id,
+      ),
+    );
+    assert.equal(
+      (await repository.readMethods(db)).find((m) => m.id === debit.id)
+        .settlementDay,
+      null,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v6 card type migration keeps legacy cards unknown and preserves links, order and deleted IDs; failure rolls back", async () => {
+  const db = sqliteAdapter();
+  try {
+    await db.execAsync(`${V4_SCHEMA}
+      ALTER TABLE expenses ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE expenses ADD COLUMN categoryCode TEXT;
+      CREATE INDEX expenses_order_idx ON expenses(sortOrder, id);
+      PRAGMA user_version = 6;
+      INSERT INTO payment_providers (code, kind, name) VALUES
+        ('bank_kb', 'bank', 'KB국민은행'), ('card_samsung', 'card', '삼성카드');
+      INSERT INTO payment_methods (id, kind, providerCode, name, bankId, settlementDay, sortOrder) VALUES
+        (1, 'bank', 'bank_kb', '급여', NULL, NULL, 0),
+        (2, 'card', 'card_samsung', '체크라는 이름', 1, 25, 1),
+        (5, 'card', 'card_samsung', '신용이라는 이름', 1, NULL, 0),
+        (90, 'bank', 'bank_kb', '삭제한 통장', NULL, NULL, 1);
+      DELETE FROM payment_methods WHERE id = 90;
+      INSERT INTO expenses (id, name, amountTypeCode, amount, chargeDay, methodId, sortOrder, categoryCode) VALUES
+        (10, '구독', 'fixed', 17000, 15, 2, 0, 'subscription');
+    `);
+    const methods = await readPreCardTypeMethods(db);
+    const expenses = await repository.readExpenses(db);
+    const rawMethods = await db.getAllAsync(
+      "SELECT * FROM payment_methods ORDER BY id",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      if (sql === "PRAGMA user_version = 7;")
+        throw new Error("Simulated card type migration failure");
+      return exec(sql);
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated card type migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      6,
+    );
+    assert.ok(
+      !(await db.getAllAsync("PRAGMA table_info(payment_methods)")).some(
+        (column) => column.name === "cardTypeCode",
+      ),
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
+      rawMethods,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      7,
+    );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    await assert.rejects(
+      repository.saveMethod(
+        db,
+        {
+          kind: "card",
+          providerCode: "card_samsung",
+          name: "수정",
+          bankId: 1,
+          settlementDay: 25,
+          cardTypeCode: null,
+        },
+        2,
+      ),
+      /신용카드 또는 체크카드/,
+    );
+    await repository.saveMethod(db, { ...bankInput, name: "새 통장" });
+    assert.equal(
+      (await repository.readMethods(db)).find((m) => m.name === "새 통장").id,
+      91,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("expense custom order persists independently of charge day and registration, including duplicate names", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-expense-order-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const base = {
+      name: "구독",
+      amountTypeCode: "fixed",
+      amount: 17000,
+      methodId: 1,
+    };
+    await repository.saveExpense(db, { ...base, chargeDay: 20 });
+    await repository.saveExpense(db, { ...base, chargeDay: 1 });
+    await repository.saveExpense(db, {
+      ...base,
+      name: "관리비",
+      amountTypeCode: "variable",
+      amount: null,
+      chargeDay: 25,
+    });
+    const idsOf = async (order) =>
+      domain
+        .sortExpenses(await repository.readExpenses(db), order)
+        .map((e) => e.id);
+    const [a, b, c] = await idsOf("registered");
+    assert.deepEqual(await idsOf("charge_day"), [b, a, c]);
+    assert.deepEqual(await idsOf("custom"), [a, b, c]);
+    assert.deepEqual(await idsOf("amount"), [a, b, c]);
+    await repository.reorderExpenses(db, [c, b, a]);
+    assert.deepEqual(await idsOf("charge_day"), [b, a, c]);
+    assert.deepEqual(await idsOf("custom"), [c, b, a]);
+    assert.deepEqual(await idsOf("registered"), [a, b, c]);
+    assert.deepEqual(await idsOf("amount"), [a, b, c]);
+    const snapshot = await repository.readExpenses(db);
+    for (const invalid of [
+      [a, b],
+      [a, a, c],
+      [a, b, 999],
+    ]) {
+      await assert.rejects(repository.reorderExpenses(db, invalid));
+      assert.deepEqual(await repository.readExpenses(db), snapshot);
+    }
+    const run = db.runAsync;
+    let writes = 0;
+    db.runAsync = async (sql, ...params) => {
+      if (sql.startsWith("UPDATE expenses SET sortOrder") && ++writes === 2)
+        throw new Error("Simulated expense order save failure");
+      return run(sql, ...params);
+    };
+    await assert.rejects(
+      repository.reorderExpenses(db, [a, b, c]),
+      /Simulated expense order save failure/,
+    );
+    assert.deepEqual(await repository.readExpenses(db), snapshot);
+    db.runAsync = run;
+    await repository.saveExpense(
+      db,
+      { ...base, chargeDay: 1, name: "수정된 구독", amount: 15000 },
+      a,
+    );
+    assert.deepEqual(await idsOf("custom"), [c, b, a]);
+    assert.deepEqual(await idsOf("charge_day"), [b, a, c]);
+    await repository.saveExpense(db, {
+      ...base,
+      chargeDay: 10,
+      name: "새 구독",
+    });
+    const next = (await repository.readExpenses(db)).find(
+      (e) => e.name === "새 구독",
+    );
+    assert.deepEqual(await idsOf("custom"), [c, b, a, next.id]);
+    assert.deepEqual(await idsOf("charge_day"), [b, a, next.id, c]);
+    assert.deepEqual(await idsOf("registered"), [a, b, c, next.id]);
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await idsOf("custom"), [c, b, a, next.id]);
+    assert.deepEqual(await idsOf("charge_day"), [b, a, next.id, c]);
+    assert.deepEqual(await idsOf("registered"), [a, b, c, next.id]);
+    assert.ok(
+      (await repository.readExpenses(db)).every((e) => e.methodId === 1),
+    );
+    assert.equal(
+      (await repository.readExpenses(db)).find((e) => e.id === c).amount,
+      null,
+    );
+    await repository.deleteExpense(db, b);
+    assert.deepEqual(await idsOf("custom"), [c, a, next.id]);
+    assert.deepEqual(await idsOf("registered"), [a, c, next.id]);
+    assert.deepEqual(await idsOf("charge_day"), [a, next.id, c]);
+    assert.deepEqual(domain.sortExpenses([], "charge_day"), []);
+    assert.deepEqual(domain.sortExpenses([], "registered"), []);
+    assert.deepEqual(domain.sortExpenses([], "custom"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true });
+  }
+});
+
+test("v4 order upgrade preserves types, amounts and links; partial migration rolls back and retries", async () => {
+  const db = sqliteAdapter();
+  try {
+    await db.execAsync(V4_SCHEMA);
+    await db.execAsync(`
+      INSERT INTO payment_providers (code, kind, name) VALUES ('bank_kb', 'bank', 'KB국민은행');
+      INSERT INTO payment_methods (id, kind, providerCode, name) VALUES (1, 'bank', 'bank_kb', '급여 통장');
+      INSERT INTO expenses (id, name, amountTypeCode, amount, chargeDay, methodId) VALUES
+        (5, '구독', 'fixed', 17000, 20, 1), (20, '관리비', 'variable', NULL, 1, 1), (90, '삭제한 항목', 'fixed', 1000, 5, NULL);
+      DELETE FROM expenses WHERE id = 90;
+    `);
+    const before = await repository.readExpenses(db);
+    const methods = await readPreCardTypeMethods(db);
+    const run = db.runAsync;
+    let writes = 0;
+    db.runAsync = async (sql, ...params) => {
+      if (sql.startsWith("UPDATE expenses SET sortOrder") && ++writes === 2)
+        throw new Error("Simulated expense order migration failure");
+      return run(sql, ...params);
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated expense order migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      4,
+    );
+    assert.deepEqual(await repository.readExpenses(db), before);
+    assert.equal(
+      (await db.getAllAsync("PRAGMA table_info(expenses)")).some(
+        (c) => c.name === "sortOrder",
+      ),
+      false,
+    );
+    db.runAsync = run;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      7,
+    );
+    const expenses = await repository.readExpenses(db);
+    assert.deepEqual(
+      expenses.map(({ sortOrder, categoryCode, ...expense }) => expense),
+      before.map((expense) => ({ ...expense })),
+    );
+    assert.deepEqual(
+      domain.sortExpenses(expenses, "custom").map((e) => e.id),
+      [5, 20],
+    );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    await repository.saveExpense(db, {
+      name: "전기요금",
+      amountTypeCode: "variable",
+      amount: null,
+      chargeDay: 25,
+      methodId: 1,
+    });
+    const next = (await repository.readExpenses(db)).find(
+      (e) => e.name === "전기요금",
+    );
+    assert.equal(next.id, 91);
+    assert.equal(next.sortOrder, 2);
+    assert.deepEqual(
+      domain
+        .sortExpenses(await repository.readExpenses(db), "registered")
+        .map((e) => e.id),
+      [5, 20, 91],
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("categories persist, filter totals, validate codes and preserve hidden rows during drag", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-categories-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const base = {
+      name: "구독",
+      amountTypeCode: "fixed",
+      amount: 17000,
+      chargeDay: 5,
+      methodId: 1,
+    };
+    await repository.saveExpense(db, {
+      ...base,
+      name: "월세",
+      amount: 750000,
+      categoryCode: "living",
+    });
+    await repository.saveExpense(db, { ...base, categoryCode: "subscription" });
+    await repository.saveExpense(db, {
+      ...base,
+      name: "관리비",
+      amountTypeCode: "variable",
+      amount: null,
+      categoryCode: "living",
+    });
+    await repository.saveExpense(db, {
+      ...base,
+      name: "이전 항목",
+      categoryCode: null,
+    });
+    let all = domain.sortExpenses(await repository.readExpenses(db), "custom");
+    const [rent, subscription, variable, legacy] = all;
+    assert.equal(domain.filterExpenses(all, "all").length, 4);
+    const living = domain.filterExpenses(all, "living");
+    assert.deepEqual(
+      living.map((e) => e.id),
+      [rent.id, variable.id],
+    );
+    assert.equal(domain.monthlyTotal(living), 750000);
+    assert.equal(
+      domain.monthlyTotal(domain.filterExpenses(all, "subscription")),
+      17000,
+    );
+    const snapshot = all.map((e) =>
+      Object.assign(Object.create(Object.getPrototypeOf(e)), e),
+    );
+    const merged = domain.mergeExpenseOrder(all, [variable, rent]);
+    assert.deepEqual(all, snapshot);
+    assert.deepEqual(
+      merged.map((e) => e.id),
+      [variable.id, subscription.id, rent.id, legacy.id],
+    );
+    await repository.reorderExpenses(
+      db,
+      merged.map((e) => e.id),
+    );
+    await repository.saveExpense(
+      db,
+      {
+        ...base,
+        name: "분류 수정",
+        amount: 750000,
+        categoryCode: "subscription",
+      },
+      rent.id,
+    );
+    all = domain.sortExpenses(await repository.readExpenses(db), "custom");
+    assert.deepEqual(
+      all.map((e) => e.id),
+      merged.map((e) => e.id),
+    );
+    assert.deepEqual(
+      domain.filterExpenses(all, "living").map((e) => e.id),
+      [variable.id],
+    );
+    assert.equal(
+      domain.monthlyTotal(domain.filterExpenses(all, "subscription")),
+      767000,
+    );
+    await assert.rejects(
+      repository.saveExpense(db, { ...base, categoryCode: "unknown" }, rent.id),
+    );
+    await assert.rejects(
+      db.runAsync(
+        "UPDATE expenses SET categoryCode = 'unknown' WHERE id = ?",
+        rent.id,
+      ),
+    );
+    assert.deepEqual(
+      domain.sortExpenses(await repository.readExpenses(db), "custom"),
+      all,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      domain.sortExpenses(await repository.readExpenses(db), "custom"),
+      all,
+    );
+    assert.ok(
+      (await repository.readExpenses(db)).every((e) => e.methodId === 1),
+    );
+    assert.deepEqual(domain.mergeExpenseOrder(all, []), all);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true });
+  }
+});
+
+test("v5 category migration preserves IDs, amounts, links, custom order and deleted sequence; failure rolls back", async () => {
+  const db = sqliteAdapter();
+  try {
+    await db.execAsync(`${V4_SCHEMA}
+      ALTER TABLE expenses ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0 CHECK (sortOrder >= 0);
+      CREATE INDEX expenses_order_idx ON expenses(sortOrder, id);
+      PRAGMA user_version = 5;
+      INSERT INTO payment_providers (code, kind, name) VALUES ('bank_kb', 'bank', 'KB국민은행');
+      INSERT INTO payment_methods (id, kind, providerCode, name) VALUES (1, 'bank', 'bank_kb', '급여 통장');
+      INSERT INTO expenses (id, name, amountTypeCode, amount, chargeDay, methodId, sortOrder) VALUES
+        (5, '월세', 'fixed', 750000, 5, 1, 1), (20, '관리비', 'variable', NULL, 25, 1, 0), (90, '삭제', 'fixed', 1, 1, NULL, 2);
+      DELETE FROM expenses WHERE id = 90;`);
+    const before = await repository.readExpenses(db);
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      if (sql === "PRAGMA user_version = 6;")
+        throw new Error("Simulated category migration failure");
+      return exec(sql);
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated category migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      5,
+    );
+    assert.deepEqual(await repository.readExpenses(db), before);
+    assert.ok(
+      !(await db.getAllAsync("PRAGMA table_info(expenses)")).some(
+        (column) => column.name === "categoryCode",
+      ),
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      7,
+    );
+    assert.deepEqual(
+      await repository.readExpenses(db),
+      before.map((e) =>
+        Object.assign(Object.create(Object.getPrototypeOf(e)), e, {
+          categoryCode: null,
+        }),
+      ),
+    );
+    assert.deepEqual(
+      domain
+        .sortExpenses(await repository.readExpenses(db), "custom")
+        .map((e) => e.id),
+      [20, 5],
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+    await repository.initializeDatabase(db);
+    await repository.saveExpense(db, {
+      name: "신규",
+      amountTypeCode: "fixed",
+      amount: 10000,
+      chargeDay: 10,
+      methodId: 1,
+      categoryCode: "subscription",
+    });
+    const next = (await repository.readExpenses(db)).find(
+      (e) => e.name === "신규",
+    );
+    assert.equal(next.id, 91);
+    assert.equal(next.sortOrder, 2);
+    assert.equal(next.categoryCode, "subscription");
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("fixed and variable expenses persist, convert safely, and exclude variable amounts from totals", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-types-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const base = { name: "관리비", chargeDay: 25, methodId: 1 };
+    await repository.saveExpense(db, {
+      ...base,
+      amountTypeCode: "variable",
+      amount: null,
+    });
+    await repository.saveExpense(db, {
+      ...base,
+      name: "월세",
+      amountTypeCode: "fixed",
+      amount: 750000,
+    });
+    let expenses = await repository.readExpenses(db);
+    const variableId = expenses.find((e) => e.amountTypeCode === "variable").id;
+    assert.equal(domain.monthlyTotal(expenses), 750000);
+    assert.equal(
+      domain.expenseAmountLabel(expenses.find((e) => e.id === variableId)),
+      "매월 변동",
+    );
+    const bank = (await repository.readMethods(db))[0];
+    assert.equal(
+      domain.monthlyTotal(domain.relatedExpenses(bank, [bank], expenses)),
+      750000,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    await repository.saveExpense(
+      db,
+      { ...base, amountTypeCode: "fixed", amount: 50000 },
+      variableId,
+    );
+    assert.equal(
+      domain.monthlyTotal(await repository.readExpenses(db)),
+      800000,
+    );
+    await repository.saveExpense(
+      db,
+      { ...base, amountTypeCode: "variable", amount: null },
+      variableId,
+    );
+    expenses = await repository.readExpenses(db);
+    assert.equal(expenses.find((e) => e.id === variableId).amount, null);
+    assert.equal(domain.monthlyTotal(expenses), 750000);
+    for (const invalid of [
+      { amountTypeCode: "unknown", amount: null },
+      { amountTypeCode: "fixed", amount: null },
+      { amountTypeCode: "fixed", amount: 0 },
+      { amountTypeCode: "fixed", amount: 1.5 },
+      { amountTypeCode: "fixed", amount: 1000000000 },
+      { amountTypeCode: "variable", amount: 50000 },
+      { amountTypeCode: "variable", amount: 0 },
+    ]) {
+      await assert.rejects(
+        repository.saveExpense(db, { ...base, ...invalid }, variableId),
+      );
+      await assert.rejects(
+        db.runAsync(
+          "UPDATE expenses SET amountTypeCode = ?, amount = ? WHERE id = ?",
+          invalid.amountTypeCode,
+          invalid.amount,
+          variableId,
+        ),
+      );
+    }
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    await repository.deleteMethod(db, 1);
+    assert.ok(
+      (await repository.readExpenses(db)).every((e) => e.methodId === null),
+    );
+    await repository.deleteExpense(db, variableId);
+    assert.equal((await repository.readExpenses(db)).length, 1);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true });
+  }
+});
+
+test("v3 amount type migration preserves data, links and deleted IDs; a failure rolls back and retries", async () => {
+  const db = sqliteAdapter();
+  try {
+    await db.execAsync(V3_SCHEMA);
+    await db.execAsync(`
+      INSERT INTO payment_providers (code, kind, name) VALUES ('bank_kb', 'bank', 'KB국민은행');
+      INSERT INTO payment_methods (id, kind, providerCode, name) VALUES (1, 'bank', 'bank_kb', '급여 통장');
+      INSERT INTO expenses (id, name, amount, chargeDay, methodId) VALUES
+        (10, '월세', 750000, 1, 1), (11, '관리비', 150000, 25, 1), (90, '삭제한 항목', 1000, 5, NULL);
+      DELETE FROM expenses WHERE id = 90;
+    `);
+    const before = await repository.readExpenses(db);
+    const methods = await readPreCardTypeMethods(db);
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql.includes("ALTER TABLE expenses_v4 RENAME TO expenses"))
+        throw new Error("Simulated expense type migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated expense type migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      3,
+    );
+    assert.deepEqual(await repository.readExpenses(db), before);
+    assert.equal(
+      (await db.getAllAsync("PRAGMA table_info(expenses)")).some(
+        (c) => c.name === "amountTypeCode",
+      ),
+      false,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'expenses_v4'",
+      ),
+      undefined,
+    );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          "SELECT seq FROM sqlite_sequence WHERE name = 'expenses'",
+        )
+      ).seq,
+      90,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      7,
+    );
+    assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
+    await repository.saveExpense(db, {
+      name: "전기요금",
+      amountTypeCode: "variable",
+      amount: null,
+      chargeDay: 20,
+      methodId: 1,
+    });
+    assert.equal(
+      (await repository.readExpenses(db)).find((e) => e.name === "전기요금").id,
+      91,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
 
 test("v2 upgrade keeps existing newest-first order and links; failed upgrades can retry", async () => {
   const db = sqliteAdapter();

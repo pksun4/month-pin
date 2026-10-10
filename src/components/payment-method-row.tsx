@@ -1,18 +1,15 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { PaymentMethod } from "../data/models";
-import { methodLabel, money } from "../utils/expenses";
+import {
+  cardTypeLabel,
+  cardWithdrawalLabel,
+  methodLabel,
+  money,
+} from "../utils/expenses";
 import { ProviderIcon } from "./provider-icon";
 import { colors, s } from "./ui";
-
-interface DragHandle {
-  active: boolean;
-  busy: boolean;
-  onDrag: () => void;
-  onAccessibilityMove: (direction: -1 | 1) => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-}
+import { ReorderHandle, type ReorderControls } from "./reorder-handle";
 
 export function PaymentMethodRow({
   method,
@@ -25,37 +22,37 @@ export function PaymentMethodRow({
   total: number;
   bank?: PaymentMethod;
   onPress: () => void;
-  reorder?: DragHandle;
+  reorder?: ReorderControls;
 }) {
-  const withdrawal = `${bank ? bank.name : "출금 통장 미지정"} · ${method.settlementDay ? `${method.settlementDay}일 출금` : "출금일 미지정"}`;
+  const withdrawal = cardWithdrawalLabel(method, bank);
+  const providerLabel =
+    method.kind === "card"
+      ? `${method.provider} · ${cardTypeLabel(method)}`
+      : method.provider;
   return (
     <View style={[styles.card, reorder?.active && styles.active]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${methodLabel(method)}, 월 고정비 ${money(total)}${method.kind === "card" ? `, ${withdrawal}` : ""}, 상세보기`}
+        accessibilityLabel={`${methodLabel(method)}, 고정 금액 합계 ${money(total)}${method.kind === "card" ? `, ${cardTypeLabel(method)}, ${withdrawal}` : ""}, 상세보기`}
         disabled={Boolean(reorder)}
         accessible={!reorder}
         onPress={onPress}
         style={({ pressed }) => [styles.content, pressed && { opacity: 0.65 }]}
       >
         <View style={styles.main}>
-          <ProviderIcon
-            code={method.providerCode}
-            kind={method.kind}
-            size={40}
-          />
+          <ProviderIcon code={method.providerCode} size={40} />
           <View style={s.flex}>
             <Text numberOfLines={1} style={styles.name}>
               {method.name}
             </Text>
             <Text numberOfLines={1} style={styles.provider}>
-              {method.provider}
+              {providerLabel}
             </Text>
           </View>
           {!reorder && (
             <>
               <View style={styles.total}>
-                <Text style={styles.totalLabel}>월 고정비</Text>
+                <Text style={styles.totalLabel}>고정 합계</Text>
                 <Text
                   numberOfLines={1}
                   adjustsFontSizeToFit
@@ -76,40 +73,7 @@ export function PaymentMethodRow({
         )}
       </Pressable>
       {reorder && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${methodLabel(method)} 순서 변경`}
-          accessibilityHint="손잡이를 잡고 위아래로 이동하세요. 화면 읽기 기능에서는 이동 동작을 선택하세요."
-          accessibilityState={{ disabled: reorder.busy }}
-          accessibilityActions={[
-            ...(reorder.canMoveUp
-              ? [{ name: "decrement", label: "위로 이동" }]
-              : []),
-            ...(reorder.canMoveDown
-              ? [{ name: "increment", label: "아래로 이동" }]
-              : []),
-          ]}
-          onAccessibilityAction={({ nativeEvent }) => {
-            if (reorder.busy) return;
-            if (nativeEvent.actionName === "decrement")
-              reorder.onAccessibilityMove(-1);
-            if (nativeEvent.actionName === "increment")
-              reorder.onAccessibilityMove(1);
-          }}
-          disabled={reorder.busy}
-          onPressIn={reorder.onDrag}
-          style={({ pressed }) => [
-            styles.dragHandle,
-            reorder.busy && { opacity: 0.4 },
-            (pressed || reorder.active) && { backgroundColor: colors.softBlue },
-          ]}
-        >
-          <Ionicons
-            name="reorder-three-outline"
-            size={26}
-            color={colors.blue}
-          />
-        </Pressable>
+        <ReorderHandle label={methodLabel(method)} reorder={reorder} />
       )}
     </View>
   );
@@ -144,12 +108,5 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 5,
-  },
-  dragHandle: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
   },
 });

@@ -29,6 +29,7 @@ interface Store {
   deleteExpense: (id: number) => Promise<void>;
   deleteMethod: (id: number) => Promise<void>;
   reorderMethods: (kind: MethodKind, ids: readonly number[]) => Promise<void>;
+  reorderExpenses: (ids: readonly number[]) => Promise<void>;
 }
 
 const Context = createContext<Store | null>(null);
@@ -95,6 +96,8 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
         deleteMethod: (id) => mutate(() => repository.deleteMethod(db, id)),
         reorderMethods: (kind, ids) =>
           mutate(() => repository.reorderMethods(db, kind, ids)),
+        reorderExpenses: (ids) =>
+          mutate(() => repository.reorderExpenses(db, ids)),
       }}
     >
       {children}

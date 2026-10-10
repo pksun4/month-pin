@@ -2,37 +2,65 @@ import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { router } from "expo-router";
 import type { Expense } from "../data/models";
+import {
+  EXPENSE_AMOUNT_TYPES,
+  EXPENSE_CATEGORIES,
+  type ExpenseCategoryCode,
+  type ExpenseAmountTypeCode,
+} from "../data/expense-types";
 import { useMonthPin } from "../hooks/use-month-pin";
-import { methodLabel, parseAmount, parseDay } from "../utils/expenses";
+import {
+  formatAmountInput,
+  methodLabel,
+  parseAmount,
+  parseDay,
+  paymentMethodsByKind,
+} from "../utils/expenses";
 import { Button, Choice, Field, s } from "./ui";
 
 export function ExpenseForm({
   expense,
   onClose,
+  initialCategoryCode,
 }: {
   expense?: Expense;
   onClose: () => void;
+  initialCategoryCode?: ExpenseCategoryCode;
 }) {
   const { methods, saveExpense, busy } = useMonthPin();
   const [name, setName] = useState(expense?.name ?? "");
-  const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
+  const [categoryCode, setCategoryCode] = useState<ExpenseCategoryCode | null>(
+    expense ? expense.categoryCode : (initialCategoryCode ?? null),
+  );
+  const [amountTypeCode, setAmountTypeCode] = useState<ExpenseAmountTypeCode>(
+    expense?.amountTypeCode ?? "fixed",
+  );
+  const [amount, setAmount] = useState(
+    expense?.amount != null ? formatAmountInput(String(expense.amount)) : "",
+  );
   const [day, setDay] = useState(expense ? String(expense.chargeDay) : "");
   const [methodId, setMethodId] = useState<number | null>(
     expense?.methodId ?? null,
   );
   const [error, setError] = useState("");
   const submitting = useRef(false);
+  const orderedMethods = paymentMethodsByKind(methods);
 
   async function submit() {
     if (submitting.current) return;
-    const parsedAmount = parseAmount(amount);
+    const parsedAmount =
+      amountTypeCode === "fixed" ? parseAmount(amount) : null;
     const parsedDay = parseDay(day);
     if (!name.trim()) {
       setError("고정비 이름을 입력해 주세요.");
       return;
     }
-    if (parsedAmount === null) {
+    if (amountTypeCode === "fixed" && parsedAmount === null) {
       setError("금액은 1원부터 999,999,999원까지 입력해 주세요.");
+      return;
+    }
+    if (categoryCode === null) {
+      setError("생활·구독 분류를 선택해 주세요.");
       return;
     }
     if (parsedDay === null) {
@@ -45,6 +73,8 @@ export function ExpenseForm({
       await saveExpense(
         {
           name: name.trim(),
+          categoryCode,
+          amountTypeCode,
           amount: parsedAmount,
           chargeDay: parsedDay,
           methodId,
@@ -68,14 +98,59 @@ export function ExpenseForm({
         placeholder="예: 월세, 넷플릭스, 휴대폰 요금"
         maxLength={60}
       />
-      <Field
-        label="월 금액 (원)"
-        value={amount}
-        onChangeText={setAmount}
-        placeholder="예: 17,000"
-        numeric
-        maxLength={13}
-      />
+      <View style={s.field}>
+        <Text style={s.fieldLabel}>분류</Text>
+        <View accessibilityRole="radiogroup" style={s.row}>
+          {EXPENSE_CATEGORIES.map((category) => (
+            <View key={category.code} style={s.flex}>
+              <Choice
+                label={category.label}
+                selected={categoryCode === category.code}
+                disabled={busy}
+                onPress={() => {
+                  setCategoryCode(category.code);
+                  setError("");
+                }}
+              />
+            </View>
+          ))}
+        </View>
+      </View>
+      <View style={s.field}>
+        <Text style={s.fieldLabel}>금액 유형</Text>
+        <View accessibilityRole="radiogroup" style={s.row}>
+          {EXPENSE_AMOUNT_TYPES.map((type) => (
+            <View key={type.code} style={s.flex}>
+              <Choice
+                label={type.label}
+                selected={amountTypeCode === type.code}
+                disabled={busy}
+                onPress={() => {
+                  setAmountTypeCode(type.code);
+                  setError("");
+                }}
+              />
+            </View>
+          ))}
+        </View>
+      </View>
+      {amountTypeCode === "fixed" ? (
+        <Field
+          label="고정 월 금액 (원)"
+          value={amount}
+          onChangeText={(value) =>
+            setAmount((previous) => formatAmountInput(value, previous))
+          }
+          placeholder="예: 17,000"
+          numeric
+          maxLength={13}
+        />
+      ) : (
+        <Text style={s.caption}>
+          관리비·전기요금처럼 매월 금액이 달라지는 항목이에요. 기본 금액 없이
+          등록해요.
+        </Text>
+      )}
       <Field
         label="매월 결제일"
         value={day}
@@ -95,7 +170,7 @@ export function ExpenseForm({
           selected={methodId === null}
           onPress={() => setMethodId(null)}
         />
-        {methods.map((method) => (
+        {orderedMethods.map((method) => (
           <Choice
             key={method.id}
             label={`${method.kind === "bank" ? "통장" : "카드"} · ${methodLabel(method)}`}

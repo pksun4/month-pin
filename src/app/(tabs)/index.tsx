@@ -32,9 +32,7 @@ export default function HomeScreen() {
       <Header title="MonthPin" description="매달 나가는 돈을 한눈에" />
       <View style={s.hero}>
         <View style={s.between}>
-          <Text style={s.heroLabel}>
-            {now.getMonth() + 1}월 · 월 고정비 합계
-          </Text>
+          <Text style={s.heroLabel}>고정 금액 합계 · 월 기준</Text>
           <Ionicons name="pin-outline" size={24} color={colors.white} />
         </View>
         <Text adjustsFontSizeToFit numberOfLines={1} style={s.heroAmount}>
@@ -42,7 +40,7 @@ export default function HomeScreen() {
         </Text>
         <Text style={s.heroFooter}>
           고정비 {expenses.length}개 · 결제수단 {methods.length}개{"\n"}등록한
-          항목의 월 예상 금액이에요.
+          고정 금액만 합산해요. 변동 항목은 제외돼요.
         </Text>
       </View>
       <View style={s.between}>
@@ -60,7 +58,7 @@ export default function HomeScreen() {
             <ExpenseRow
               key={expense.id}
               expense={expense}
-              dateLabel={`${date.getMonth() + 1}/${date.getDate()} 예정`}
+              dateLabel={`${date.getMonth() + 1}/${date.getDate()}`}
               onPress={() => router.navigate("/expenses")}
             />
           ))}

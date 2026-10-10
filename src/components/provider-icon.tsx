@@ -1,56 +1,41 @@
-import { StyleSheet, Text, View } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
-import type { MethodKind } from "../data/models";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { getProvider } from "../data/providers";
+import { PROVIDER_LOGOS } from "../data/provider-logos";
 import { colors } from "./ui";
 
 export function ProviderIcon({
   code,
-  kind,
   size = 36,
 }: {
   code: string | null;
-  kind: MethodKind;
   size?: number;
 }) {
   const provider = getProvider(code);
+  const logoSize = Math.min((size * 5) / 6, 24);
   return (
     <View
       accessible={false}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[
-        styles.icon,
-        {
-          width: size,
-          height: size,
-          borderRadius: size * 0.3,
-          backgroundColor: provider?.background ?? colors.softBlue,
-        },
-      ]}
+      pointerEvents="none"
+      style={[styles.logo, { width: size, height: size }]}
     >
       {provider ? (
-        <Text
-          allowFontScaling={false}
-          style={{
-            color: provider.color,
-            fontSize: size * (provider.mark.length > 2 ? 0.3 : 0.36),
-            fontWeight: "800",
-          }}
-        >
-          {provider.mark}
-        </Text>
-      ) : (
-        <Ionicons
-          name={kind === "bank" ? "business-outline" : "card-outline"}
-          size={size * 0.5}
-          color={colors.blue}
+        <Image
+          source={PROVIDER_LOGOS[provider.code]}
+          resizeMode="contain"
+          style={{ width: logoSize, height: logoSize }}
         />
+      ) : (
+        <Text allowFontScaling={false} style={styles.placeholder}>
+          —
+        </Text>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  icon: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  logo: { alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  placeholder: { color: colors.muted, fontSize: 14, lineHeight: 20 },
 });
