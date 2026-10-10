@@ -33,6 +33,8 @@ function loadTypeScript(path) {
 }
 const repository = loadTypeScript("src/data/database.ts");
 const domain = loadTypeScript("src/utils/expenses.ts");
+const ledgerRepository = loadTypeScript("src/data/ledger.ts");
+const ledgerDomain = loadTypeScript("src/utils/ledger.ts");
 
 function sqliteAdapter(path = ":memory:") {
   const sqlite = new DatabaseSync(path);
@@ -83,6 +85,771 @@ const bankInput = {
   settlementDay: null,
   cardTypeCode: null,
 };
+
+const insuranceInput = {
+  name: "보험료",
+  amountTypeCode: "fixed",
+  amount: 50000,
+  chargeDay: 31,
+  methodId: null,
+  categoryCode: "living",
+};
+
+test("default-today changes preserve earlier occurrences and update today and cached future amounts", async () => {
+  const db = sqliteAdapter();
+  const today = new Date();
+  const currentMonth = ledgerDomain.monthKey(today);
+  const previousMonth = ledgerDomain.moveMonth(currentMonth, -1);
+  const futureMonth = ledgerDomain.moveMonth(currentMonth, 1);
+  try {
+    await repository.initializeDatabase(db);
+    const input = { ...insuranceInput, chargeDay: today.getDate() };
+    await repository.saveExpense(db, input);
+    const expense = (await repository.readExpenses(db))[0];
+    const prior = await ledgerRepository.loadLedgerMonth(db, previousMonth);
+    const current = await ledgerRepository.loadLedgerMonth(db, currentMonth);
+    const future = await ledgerRepository.loadLedgerMonth(db, futureMonth);
+    await repository.saveExpense(db, { ...input, amount: 55000 }, expense.id);
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, previousMonth),
+      prior,
+    );
+    const updated = (
+      await ledgerRepository.loadLedgerMonth(db, currentMonth)
+    )[0];
+    assert.equal(updated.id, current[0].id);
+    assert.equal(updated.amount, 55000);
+    assert.equal(updated.amountEntered, false);
+    const updatedFuture = (
+      await ledgerRepository.loadLedgerMonth(db, futureMonth)
+    )[0];
+    assert.equal(updatedFuture.id, future[0].id);
+    assert.equal(updatedFuture.amount, 55000);
+    // Loading an earlier month for the first time uses the baseline, not the edited template.
+    assert.equal(
+      (
+        await ledgerRepository.loadLedgerMonth(
+          db,
+          ledgerDomain.moveMonth(currentMonth, -2),
+        )
+      )[0].amount,
+      50000,
+    );
+    const versions = await db.getAllAsync(
+      "SELECT effectiveDate, amount FROM expense_amount_versions WHERE expenseId = ? ORDER BY effectiveDate",
+      expense.id,
+    );
+    assert.deepEqual(
+      versions.map((row) => ({ ...row })),
+      [
+        { effectiveDate: "1000-01-01", amount: 50000 },
+        { effectiveDate: ledgerDomain.dateKey(today), amount: 55000 },
+      ],
+    );
+    if (today.getDate() > 1) {
+      const earlierInput = { ...input, chargeDay: today.getDate() - 1 };
+      await repository.saveExpense(db, earlierInput);
+      const earlierExpense = (await repository.readExpenses(db)).find(
+        (entry) => entry.id !== expense.id,
+      );
+      const earlier = (
+        await ledgerRepository.loadLedgerMonth(db, currentMonth)
+      ).find((entry) => entry.expenseId === earlierExpense.id);
+      await repository.saveExpense(
+        db,
+        { ...earlierInput, amount: 60000 },
+        earlierExpense.id,
+      );
+      assert.deepEqual(
+        (await ledgerRepository.loadLedgerMonth(db, currentMonth)).find(
+          (entry) => entry.id === earlier.id,
+        ),
+        earlier,
+      );
+    }
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("scheduled amount histories respect leap-day cutoffs, repeated edits and unvisited months after reconnect", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-amount-history-"));
+  const path = join(directory, "amount.db");
+  let db = sqliteAdapter(path);
+  let year = new Date().getFullYear() + 2;
+  while (ledgerDomain.daysInMonth(`${year}-02`) !== 29) year++;
+  const january = `${year}-01`,
+    february = `${year}-02`,
+    march = `${year}-03`,
+    april = `${year}-04`;
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveExpense(db, insuranceInput);
+    const expense = (await repository.readExpenses(db))[0];
+    const januaryBefore = await ledgerRepository.loadLedgerMonth(db, january);
+    const februaryBefore = await ledgerRepository.loadLedgerMonth(db, february);
+    await repository.saveExpense(
+      db,
+      { ...insuranceInput, amount: 55000 },
+      expense.id,
+      `${year}-02-29`,
+    );
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, january),
+      januaryBefore,
+    );
+    const februaryAfter = (
+      await ledgerRepository.loadLedgerMonth(db, february)
+    )[0];
+    assert.equal(februaryAfter.id, februaryBefore[0].id);
+    assert.equal(februaryAfter.day, 29);
+    assert.equal(februaryAfter.amount, 55000);
+    await repository.saveExpense(
+      db,
+      { ...insuranceInput, amount: 60000 },
+      expense.id,
+      `${year}-04-01`,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, march))[0].amount,
+      55000,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, april))[0].amount,
+      60000,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, `${year - 1}-12`))[0].amount,
+      50000,
+    );
+    await repository.saveExpense(
+      db,
+      { ...insuranceInput, amount: 57000 },
+      expense.id,
+      `${year}-03-01`,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, february))[0].amount,
+      55000,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, march))[0].amount,
+      57000,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, april))[0].amount,
+      57000,
+    );
+    await repository.saveExpense(
+      db,
+      { ...insuranceInput, amount: 58000 },
+      expense.id,
+      `${year}-03-01`,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, march))[0].amount,
+      58000,
+    );
+    assert.equal(
+      (
+        await db.getAllAsync(
+          "SELECT id FROM expense_amount_versions WHERE expenseId = ? AND effectiveDate = ?",
+          expense.id,
+          `${year}-03-01`,
+        )
+      ).length,
+      1,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("fixed-variable conversions keep entered actuals including zero and use historical types for earlier months", async () => {
+  const db = sqliteAdapter();
+  const year = new Date().getFullYear() + 2;
+  const before = `${year}-01`,
+    enteredMonth = `${year}-02`,
+    pendingMonth = `${year}-03`;
+  try {
+    await repository.initializeDatabase(db);
+    const input = {
+      ...insuranceInput,
+      amountTypeCode: "variable",
+      amount: null,
+    };
+    await repository.saveExpense(db, input);
+    const expense = (await repository.readExpenses(db))[0];
+    await ledgerRepository.loadLedgerMonth(db, before);
+    const entered = (
+      await ledgerRepository.loadLedgerMonth(db, enteredMonth)
+    )[0];
+    await ledgerRepository.saveLedgerAmount(db, entered.id, 0);
+    const pending = (
+      await ledgerRepository.loadLedgerMonth(db, pendingMonth)
+    )[0];
+    await repository.saveExpense(
+      db,
+      insuranceInput,
+      expense.id,
+      `${year}-02-01`,
+    );
+    const retained = (
+      await ledgerRepository.loadLedgerMonth(db, enteredMonth)
+    )[0];
+    assert.equal(retained.amount, 0);
+    assert.equal(retained.amountEntered, true);
+    assert.equal(retained.amountTypeCode, "variable");
+    const automatic = (
+      await ledgerRepository.loadLedgerMonth(db, pendingMonth)
+    )[0];
+    assert.equal(automatic.id, pending.id);
+    assert.equal(automatic.amount, 50000);
+    assert.equal(automatic.amountTypeCode, "fixed");
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, before))[0].amountTypeCode,
+      "variable",
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, `${year - 1}-12`))[0].amount,
+      null,
+    );
+    await repository.saveExpense(db, input, expense.id, `${year}-03-31`);
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, pendingMonth))[0].amount,
+      null,
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, pendingMonth))[0]
+        .amountTypeCode,
+      "variable",
+    );
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, enteredMonth))[0].amount,
+      0,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("invalid dates and failed saves roll back template, history and future ledger together", async () => {
+  const db = sqliteAdapter();
+  const month = ledgerDomain.moveMonth(ledgerDomain.monthKey(), 1);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveExpense(db, insuranceInput);
+    const expense = (await repository.readExpenses(db))[0];
+    const entries = await ledgerRepository.loadLedgerMonth(db, month);
+    const history = await db.getAllAsync(
+      "SELECT * FROM expense_amount_versions",
+    );
+    for (const effectiveDate of [
+      "2025-02-29",
+      "2026-13-01",
+      "2026-02-31",
+      "oops",
+      "2000-01-01",
+    ])
+      await assert.rejects(
+        repository.saveExpense(
+          db,
+          { ...insuranceInput, amount: 55000 },
+          expense.id,
+          effectiveDate,
+        ),
+      );
+    await assert.rejects(
+      repository.saveExpense(
+        db,
+        { ...insuranceInput, amount: 55000, methodId: 999999 },
+        expense.id,
+      ),
+    );
+    assert.deepEqual(await repository.readExpenses(db), [expense]);
+    assert.deepEqual(
+      await ledgerRepository.readLedgerMonth(db, month),
+      entries,
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM expense_amount_versions"),
+      history,
+    );
+    for (const invalidDate of [
+      "2025-02-29",
+      "2026-04-31",
+      "2026-00-01",
+      "2026-01-00",
+    ])
+      await assert.rejects(
+        db.runAsync(
+          "INSERT INTO expense_amount_versions (expenseId,effectiveDate,amountTypeCode,amount) VALUES (?,?,'fixed',1)",
+          expense.id,
+          invalidDate,
+        ),
+      );
+    assert.equal(ledgerDomain.isValidDateKey("2024-02-29"), true);
+    assert.equal(ledgerDomain.isValidDateKey("2025-02-29"), false);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v8 upgrade preserves every monthly record, marks actual zero and retries an atomic history migration", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveExpense(db, insuranceInput);
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      name: "관리비",
+      amountTypeCode: "variable",
+      amount: null,
+    });
+    const methods = await repository.readMethods(db),
+      expenses = await repository.readExpenses(db);
+    const entries = await ledgerRepository.loadLedgerMonth(
+      db,
+      ledgerDomain.monthKey(),
+    );
+    const manual = entries.find((entry) => entry.amountTypeCode === "variable");
+    await ledgerRepository.saveLedgerAmount(db, manual.id, 0);
+    const saved = await ledgerRepository.readLedgerMonth(
+      db,
+      ledgerDomain.monthKey(),
+    );
+    const columns = Object.keys(saved[0]).filter(
+      (column) => column !== "amountEntered",
+    );
+    await db.execAsync(
+      "DROP TABLE ledger_entries; DROP TABLE expense_amount_versions;",
+    );
+    await db.execAsync(
+      ledgerRepository.LEDGER_SCHEMA.replace(
+        /amountEntered INTEGER[^\n]+\n/,
+        "",
+      ),
+    );
+    for (const entry of saved)
+      await db.runAsync(
+        `INSERT INTO ledger_entries (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+        ...columns.map((column) => entry[column]),
+      );
+    await db.execAsync("PRAGMA user_version = 8;");
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      if (sql === "PRAGMA user_version = 9;")
+        throw new Error("Simulated history migration failure");
+      return exec(sql);
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated history migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      8,
+    );
+    assert.equal(
+      (await db.getAllAsync("PRAGMA table_info(ledger_entries)")).some(
+        (column) => column.name === "amountEntered",
+      ),
+      false,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name='expense_amount_versions'",
+      ),
+      undefined,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      9,
+    );
+    assert.deepEqual(
+      await ledgerRepository.readLedgerMonth(db, ledgerDomain.monthKey()),
+      saved,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.equal(
+      (await db.getAllAsync("SELECT * FROM expense_amount_versions")).length,
+      expenses.length,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("ledger calendars preserve local dates, leap years and month boundaries", () => {
+  assert.equal(ledgerDomain.daysInMonth("2024-02"), 29);
+  assert.equal(ledgerDomain.daysInMonth("2025-02"), 28);
+  assert.equal(ledgerDomain.moveMonth("2026-12", 1), "2027-01");
+  assert.equal(ledgerDomain.moveMonth("2026-01", -1), "2025-12");
+  assert.equal(ledgerDomain.monthKey(new Date(2026, 9, 1)), "2026-10");
+  assert.deepEqual(
+    ledgerDomain.calendarDays("2026-02"),
+    Array.from({ length: 28 }, (_, index) => index + 1),
+  );
+  const leap = ledgerDomain.calendarDays("2024-02");
+  assert.equal(leap.length, 35);
+  assert.deepEqual(leap.slice(0, 5), [null, null, null, null, 1]);
+  assert.deepEqual(
+    leap.filter((day) => day !== null),
+    Array.from({ length: 29 }, (_, index) => index + 1),
+  );
+  assert.equal(ledgerDomain.calendarDays("2026-08").length, 42);
+  for (const month of [
+    "2026-00",
+    "2026-13",
+    "2026-2",
+    "0999-01",
+    "2026-02-01",
+    "oops",
+  ])
+    assert.throws(() => ledgerDomain.calendarDays(month));
+});
+
+test("ledger totals exclude pending amounts and distinguish an entered zero", () => {
+  const entries = [
+    { day: 2, amount: 10000 },
+    { day: 2, amount: null },
+    { day: 2, amount: 0 },
+    { day: 8, amount: 123456 },
+  ];
+  assert.deepEqual(ledgerDomain.ledgerSummary(entries), {
+    total: 133456,
+    pending: 1,
+    count: 4,
+  });
+  assert.deepEqual(ledgerDomain.dailyLedger(entries).get(2), {
+    total: 10000,
+    pending: 1,
+    count: 3,
+  });
+  assert.equal(ledgerDomain.dailyLedger(entries).get(3), undefined);
+  assert.equal(ledgerDomain.parseLedgerAmount("0"), 0);
+  assert.equal(ledgerDomain.parseLedgerAmount("123,456"), 123456);
+  assert.equal(ledgerDomain.parseLedgerAmount("999,999,999"), 999999999);
+  for (const value of ["", "-1", "1.2", "1000000000", "1e3"])
+    assert.equal(ledgerDomain.parseLedgerAmount(value), null);
+});
+
+test("monthly ledger snapshots are idempotent and actual amounts survive reconnects", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-ledger-"));
+  const path = join(directory, "ledger.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    await repository.saveMethod(db, {
+      kind: "card",
+      providerCode: "card_kb",
+      name: "생활 카드",
+      bankId: bank.id,
+      settlementDay: null,
+      cardTypeCode: "debit",
+    });
+    const card = (await repository.readMethods(db)).find(
+      (method) => method.kind === "card",
+    );
+    const fixed = {
+      name: "월 지출",
+      amountTypeCode: "fixed",
+      amount: 10000,
+      chargeDay: 31,
+      methodId: card.id,
+      categoryCode: "subscription",
+    };
+    const variable = {
+      ...fixed,
+      amountTypeCode: "variable",
+      amount: null,
+      methodId: bank.id,
+      categoryCode: "living",
+    };
+    await repository.saveExpense(db, fixed);
+    await repository.saveExpense(db, variable);
+    const february = await ledgerRepository.loadLedgerMonth(db, "2025-02");
+    assert.equal(february.length, 2); // Same name, distinct expense IDs.
+    assert.ok(february.every((entry) => entry.day === 28));
+    const automatic = february.find(
+      (entry) => entry.amountTypeCode === "fixed",
+    );
+    const manual = february.find(
+      (entry) => entry.amountTypeCode === "variable",
+    );
+    assert.equal(automatic.amount, 10000);
+    assert.equal(automatic.cardTypeCode, "debit");
+    assert.equal(automatic.providerName, "KB국민카드");
+    assert.equal(manual.amount, null);
+    await ledgerRepository.saveLedgerAmount(db, manual.id, 123456);
+    const saved = await ledgerRepository.loadLedgerMonth(db, "2025-02");
+    assert.deepEqual(ledgerDomain.ledgerSummary(saved), {
+      total: 133456,
+      pending: 0,
+      count: 2,
+    });
+    assert.deepEqual(
+      saved.map((entry) => entry.id),
+      february.map((entry) => entry.id),
+    );
+    const march = await ledgerRepository.loadLedgerMonth(db, "2025-03");
+    assert.ok(march.every((entry) => entry.day === 31));
+    assert.equal(
+      march.find((entry) => entry.amountTypeCode === "variable").amount,
+      null,
+    );
+    assert.ok(
+      march.every((entry) => !february.some((old) => old.id === entry.id)),
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, "2025-02"),
+      saved,
+    );
+    await ledgerRepository.saveLedgerAmount(db, manual.id, 0);
+    assert.deepEqual(
+      ledgerDomain.ledgerSummary(
+        await ledgerRepository.readLedgerMonth(db, "2025-02"),
+      ),
+      {
+        total: 10000,
+        pending: 0,
+        count: 2,
+      },
+    );
+    await ledgerRepository.saveLedgerAmount(db, manual.id, null);
+    assert.equal(
+      ledgerDomain.ledgerSummary(
+        await ledgerRepository.readLedgerMonth(db, "2025-02"),
+      ).pending,
+      1,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("template edits and deletions preserve monthly names, amounts and payment snapshots", async () => {
+  const db = sqliteAdapter();
+  const pastMonth = ledgerDomain.moveMonth(ledgerDomain.monthKey(), -1);
+  const futureMonth = ledgerDomain.moveMonth(ledgerDomain.monthKey(), 1);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, {
+      kind: "card",
+      providerCode: "card_kb",
+      name: "처음 카드",
+      bankId: null,
+      settlementDay: 10,
+      cardTypeCode: "credit",
+    });
+    const card = (await repository.readMethods(db))[0];
+    const input = {
+      name: "처음 구독",
+      amountTypeCode: "fixed",
+      amount: 15000,
+      chargeDay: 9,
+      methodId: card.id,
+      categoryCode: "subscription",
+    };
+    await repository.saveExpense(db, input);
+    const expense = (await repository.readExpenses(db))[0];
+    const before = await ledgerRepository.loadLedgerMonth(db, pastMonth);
+    await repository.saveExpense(
+      db,
+      {
+        ...input,
+        name: "변경 구독",
+        amount: 20000,
+        chargeDay: 15,
+      },
+      expense.id,
+    );
+    await repository.saveMethod(
+      db,
+      {
+        kind: "card",
+        providerCode: "card_shinhan",
+        name: "변경 카드",
+        bankId: null,
+        settlementDay: null,
+        cardTypeCode: "debit",
+      },
+      card.id,
+    );
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, pastMonth),
+      before,
+    );
+    const next = (await ledgerRepository.loadLedgerMonth(db, futureMonth))[0];
+    assert.equal(next.name, "변경 구독");
+    assert.equal(next.amount, 20000);
+    assert.equal(next.day, 15);
+    assert.equal(next.cardTypeCode, "debit");
+    assert.equal(next.methodName, "변경 카드");
+    await repository.saveExpense(db, {
+      ...input,
+      name: "새 구독",
+      methodId: null,
+    });
+    const augmented = await ledgerRepository.loadLedgerMonth(db, pastMonth);
+    assert.equal(augmented.length, 2);
+    assert.deepEqual(
+      augmented.find((entry) => entry.id === before[0].id),
+      before[0],
+    );
+    await repository.deleteMethod(db, card.id);
+    await repository.deleteExpense(db, expense.id);
+    const retained = await ledgerRepository.loadLedgerMonth(db, pastMonth);
+    assert.equal(retained.length, 2);
+    const history = retained.find((entry) => entry.id === before[0].id);
+    assert.deepEqual({ ...history }, { ...before[0], expenseId: null });
+    assert.equal(history.providerCode, "card_kb");
+    assert.equal(history.cardTypeCode, "credit");
+    await repository.saveExpense(db, { ...input, methodId: null });
+    const newExpense = (await repository.readExpenses(db)).find(
+      (entry) => entry.name === input.name,
+    );
+    assert.notEqual(newExpense.id, expense.id);
+    assert.equal(
+      (await ledgerRepository.loadLedgerMonth(db, pastMonth)).length,
+      3,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("ledger rejects invalid amounts, choice codes and fixed-entry edits", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    for (const amountTypeCode of ["fixed", "variable"])
+      await repository.saveExpense(db, {
+        name: amountTypeCode,
+        amountTypeCode,
+        amount: amountTypeCode === "fixed" ? 5000 : null,
+        chargeDay: 1,
+        methodId: null,
+        categoryCode: null,
+      });
+    const entries = await ledgerRepository.loadLedgerMonth(db, "2026-10");
+    const fixed = entries.find((entry) => entry.amountTypeCode === "fixed");
+    const variable = entries.find(
+      (entry) => entry.amountTypeCode === "variable",
+    );
+    await assert.rejects(ledgerRepository.saveLedgerAmount(db, fixed.id, 1000));
+    await assert.rejects(ledgerRepository.saveLedgerAmount(db, 999999, 1000));
+    await assert.rejects(ledgerRepository.saveLedgerAmount(db, -1, 1000));
+    for (const amount of [-1, 0.5, NaN, Infinity, 1000000000])
+      await assert.rejects(
+        ledgerRepository.saveLedgerAmount(db, variable.id, amount),
+      );
+    for (const clause of [
+      "month = '2026-13'",
+      "day = 0",
+      "amount = -1",
+      "amount = 0.5",
+      "amountTypeCode = 'estimate'",
+      "categoryCode = 'other'",
+      "methodKind = 'cash'",
+      "cardTypeCode = 'debit'",
+    ])
+      await assert.rejects(
+        db.runAsync(
+          `UPDATE ledger_entries SET ${clause} WHERE id = ?`,
+          variable.id,
+        ),
+      );
+    await assert.rejects(
+      db.runAsync(
+        "UPDATE ledger_entries SET amount = NULL WHERE id = ?",
+        fixed.id,
+      ),
+    );
+    await assert.rejects(ledgerRepository.loadLedgerMonth(db, "2026-13"));
+    assert.equal(
+      (await ledgerRepository.readLedgerMonth(db, "2026-10")).length,
+      2,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v7 ledger migration rolls back failures and preserves existing records and links", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    await repository.saveExpense(db, {
+      name: "기존 관리비",
+      amountTypeCode: "variable",
+      amount: null,
+      chargeDay: 31,
+      methodId: bank.id,
+      categoryCode: "living",
+    });
+    const expenses = await repository.readExpenses(db);
+    const methods = await repository.readMethods(db);
+    await db.execAsync("DROP TABLE ledger_entries; PRAGMA user_version = 7;");
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      if (sql === "PRAGMA user_version = 8;")
+        throw new Error("Simulated ledger migration failure");
+      return exec(sql);
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated ledger migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      7,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'ledger_entries'",
+      ),
+      undefined,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      9,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    const monthly = await ledgerRepository.loadLedgerMonth(db, "2024-02");
+    assert.equal(monthly[0].day, 29);
+    assert.equal(monthly[0].amount, null);
+    assert.equal(monthly[0].expenseId, expenses[0].id);
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
 
 test("payment method summaries include linked cards once and exclude variable or unassigned expenses", () => {
   const bank = { id: 1, kind: "bank" };
@@ -564,7 +1331,7 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
 
     db.sqlite.close();
@@ -654,7 +1421,7 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -1142,7 +1909,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -1314,7 +2081,7 @@ test("v4 order upgrade preserves types, amounts and links; partial migration rol
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
     const expenses = await repository.readExpenses(db);
     assert.deepEqual(
@@ -1501,7 +2268,7 @@ test("v5 category migration preserves IDs, amounts, links, custom order and dele
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -1676,7 +2443,7 @@ test("v3 amount type migration preserves data, links and deleted IDs; a failure 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      7,
+      9,
     );
     assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
     assert.deepEqual(await repository.readMethods(db), methods);

@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import type { StyleProp, TextStyle } from "react-native";
 import {
   ActivityIndicator,
   Keyboard,
@@ -23,6 +24,9 @@ export const colors = {
   muted: "#717789",
   blue: "#536DFE",
   softBlue: "#EBEEFF",
+  orange: "#E67824",
+  softOrange: "#FFF0E1",
+  orangeInk: "#A54C13",
   line: "#E7EAF2",
   red: "#BE3445",
 };
@@ -110,15 +114,22 @@ export function Header({
   title,
   description,
   action,
+  titleLeading,
+  titleStyle,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
+  titleLeading?: ReactNode;
+  titleStyle?: StyleProp<TextStyle>;
 }) {
   return (
     <View style={s.header}>
       <View style={s.flex}>
-        <Text style={s.title}>{title}</Text>
+        <View style={s.headerTitle}>
+          {titleLeading}
+          <Text style={[s.title, s.flex, titleStyle]}>{title}</Text>
+        </View>
         <Text style={s.caption}>{description}</Text>
       </View>
       {action}
@@ -239,41 +250,6 @@ export function Field({
   );
 }
 
-export function Choice({
-  label,
-  selected,
-  onPress,
-  disabled = false,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected, disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        s.choice,
-        selected && s.choiceActive,
-        (pressed || disabled) && { opacity: 0.7 },
-      ]}
-    >
-      <Ionicons
-        name={selected ? "radio-button-on" : "radio-button-off"}
-        color={selected ? colors.blue : colors.muted}
-        size={20}
-      />
-      <Text style={[s.body, s.flex, selected && { color: colors.blue }]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 export const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   page: {
@@ -298,6 +274,7 @@ export const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.8,
   },
+  headerTitle: { flexDirection: "row", alignItems: "center", gap: 8 },
   caption: { color: colors.muted, fontSize: 14, lineHeight: 22, marginTop: 6 },
   body: { color: colors.ink, fontSize: 15, lineHeight: 23 },
   sectionTitle: {
@@ -405,19 +382,18 @@ export const s = StyleSheet.create({
     color: colors.ink,
     minHeight: 52,
   },
-  choice: {
+  compactInput: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.line,
-    padding: 14,
-    borderRadius: 13,
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-    minHeight: 50,
+    borderRadius: 10,
   },
-  choiceActive: { borderColor: colors.blue, backgroundColor: colors.softBlue },
-  choices: { gap: 8 },
   error: { color: colors.red, fontSize: 14, lineHeight: 21 },
   divider: { height: 1, backgroundColor: colors.line, marginVertical: 6 },
   badge: {

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import type { Expense } from "../data/models";
 import {
@@ -11,12 +11,18 @@ import {
 import { useMonthPin } from "../hooks/use-month-pin";
 import {
   formatAmountInput,
-  methodLabel,
   parseAmount,
   parseDay,
   paymentMethodsByKind,
 } from "../utils/expenses";
-import { Button, Choice, Field, s } from "./ui";
+import { Button, Field, s } from "./ui";
+import { EffectiveDateField } from "./effective-date-field";
+import { FormSegments } from "./form-segments";
+import { FormSelect } from "./form-select";
+import { ChargeDayField } from "./charge-day-field";
+import { ProviderIcon } from "./provider-icon";
+import { METHOD_KINDS } from "../data/method-types";
+import { dateKey, isValidDateKey } from "../utils/ledger";
 
 export function ExpenseForm({
   expense,
@@ -43,8 +49,28 @@ export function ExpenseForm({
     expense?.methodId ?? null,
   );
   const [error, setError] = useState("");
+  const [effectiveDate, setEffectiveDate] = useState(() => dateKey());
+  const amountChanged =
+    !!expense &&
+    (amountTypeCode !== expense.amountTypeCode ||
+      (amountTypeCode === "fixed" && parseAmount(amount) !== expense.amount));
   const submitting = useRef(false);
   const orderedMethods = paymentMethodsByKind(methods);
+  const methodOptions = [
+    { code: null, label: "미지정" },
+    ...orderedMethods.map((method) => {
+      const kindLabel = METHOD_KINDS.find(
+        (kind) => kind.code === method.kind,
+      )!.label;
+      return {
+        code: method.id,
+        label: `${kindLabel} · ${method.name}`,
+        description: method.provider,
+        group: kindLabel,
+        icon: <ProviderIcon code={method.providerCode} size={24} />,
+      };
+    }),
+  ];
 
   async function submit() {
     if (submitting.current) return;
@@ -67,6 +93,13 @@ export function ExpenseForm({
       setError("결제일은 1일부터 31일까지 입력해 주세요.");
       return;
     }
+    if (
+      amountChanged &&
+      (!isValidDateKey(effectiveDate) || effectiveDate < dateKey())
+    ) {
+      setError("변경 적용일은 오늘 이후로 선택해 주세요.");
+      return;
+    }
     submitting.current = true;
     setError("");
     try {
@@ -80,10 +113,15 @@ export function ExpenseForm({
           methodId,
         },
         expense?.id,
+        amountChanged ? effectiveDate : undefined,
       );
       onClose();
-    } catch {
-      setError("저장하지 못했어요. 입력 내용을 확인하고 다시 시도해 주세요.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "저장하지 못했어요. 입력 내용을 확인하고 다시 시도해 주세요.",
+      );
     } finally {
       submitting.current = false;
     }
@@ -98,41 +136,27 @@ export function ExpenseForm({
         placeholder="예: 월세, 넷플릭스, 휴대폰 요금"
         maxLength={60}
       />
-      <View style={s.field}>
-        <Text style={s.fieldLabel}>분류</Text>
-        <View accessibilityRole="radiogroup" style={s.row}>
-          {EXPENSE_CATEGORIES.map((category) => (
-            <View key={category.code} style={s.flex}>
-              <Choice
-                label={category.label}
-                selected={categoryCode === category.code}
-                disabled={busy}
-                onPress={() => {
-                  setCategoryCode(category.code);
-                  setError("");
-                }}
-              />
-            </View>
-          ))}
-        </View>
-      </View>
-      <View style={s.field}>
-        <Text style={s.fieldLabel}>금액 유형</Text>
-        <View accessibilityRole="radiogroup" style={s.row}>
-          {EXPENSE_AMOUNT_TYPES.map((type) => (
-            <View key={type.code} style={s.flex}>
-              <Choice
-                label={type.label}
-                selected={amountTypeCode === type.code}
-                disabled={busy}
-                onPress={() => {
-                  setAmountTypeCode(type.code);
-                  setError("");
-                }}
-              />
-            </View>
-          ))}
-        </View>
+      <View style={styles.selections}>
+        <FormSegments
+          label="분류"
+          options={EXPENSE_CATEGORIES}
+          value={categoryCode}
+          disabled={busy}
+          onChange={(value) => {
+            setCategoryCode(value);
+            setError("");
+          }}
+        />
+        <FormSegments
+          label="금액 유형"
+          options={EXPENSE_AMOUNT_TYPES}
+          value={amountTypeCode}
+          disabled={busy}
+          onChange={(value) => {
+            setAmountTypeCode(value);
+            setError("");
+          }}
+        />
       </View>
       {amountTypeCode === "fixed" ? (
         <Field
@@ -151,34 +175,36 @@ export function ExpenseForm({
           등록해요.
         </Text>
       )}
-      <Field
-        label="매월 결제일"
+      {amountChanged && (
+        <EffectiveDateField
+          value={effectiveDate}
+          onChange={setEffectiveDate}
+          disabled={busy}
+        />
+      )}
+      <ChargeDayField
         value={day}
-        onChangeText={setDay}
-        placeholder="1 ~ 31"
-        numeric
-        maxLength={2}
+        onChange={(value) => {
+          setDay(value);
+          setError("");
+        }}
+        disabled={busy}
       />
       <Text style={s.caption}>
         카드로 결제한다면 승인되는 날짜를 입력해 주세요. 해당 날짜가 없는 달에는
         마지막 날로 표시해요.
       </Text>
-      <View style={s.choices}>
-        <Text style={s.fieldLabel}>결제수단</Text>
-        <Choice
-          label="미지정"
-          selected={methodId === null}
-          onPress={() => setMethodId(null)}
-        />
-        {orderedMethods.map((method) => (
-          <Choice
-            key={method.id}
-            label={`${method.kind === "bank" ? "통장" : "카드"} · ${methodLabel(method)}`}
-            selected={methodId === method.id}
-            onPress={() => setMethodId(method.id)}
-          />
-        ))}
-      </View>
+      <FormSelect
+        label="결제수단"
+        value={methodId}
+        options={methodOptions}
+        inlineLabel
+        onChange={(value) => {
+          setMethodId(value);
+          setError("");
+        }}
+        disabled={busy}
+      />
       {methods.length === 0 && (
         <View style={s.card}>
           <Text style={s.caption}>
@@ -202,7 +228,7 @@ export function ExpenseForm({
       ) : null}
       <Button
         label={busy ? "저장 중…" : "저장"}
-        disabled={busy}
+        disabled={busy || (day.length > 0 && parseDay(day) === null)}
         onPress={() => {
           void submit();
         }}
@@ -210,3 +236,5 @@ export function ExpenseForm({
     </>
   );
 }
+
+const styles = StyleSheet.create({ selections: { gap: 4 } });

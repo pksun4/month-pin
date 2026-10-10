@@ -1,10 +1,11 @@
 import { useCallback, useState } from "react";
-import { AppState, Pressable, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../../hooks/use-month-pin";
 import { money, monthlyTotal, nextChargeDate } from "../../utils/expenses";
 import { ExpenseRow } from "../../components/expense-row";
+import { BrandLogo } from "../../components/brand-logo";
 import { Button, colors, Empty, Header, Screen, s } from "../../components/ui";
 
 export default function HomeScreen() {
@@ -29,7 +30,12 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Header title="MonthPin" description="매달 나가는 돈을 한눈에" />
+      <Header
+        title="MonthPin"
+        description="매달 나가는 돈을 한눈에"
+        titleLeading={<BrandLogo />}
+        titleStyle={styles.brandTitle}
+      />
       <View style={s.hero}>
         <View style={s.between}>
           <Text style={s.heroLabel}>고정 금액 합계 · 월 기준</Text>
@@ -96,3 +102,12 @@ export default function HomeScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  brandTitle: {
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "700",
+    letterSpacing: -0.6,
+  },
+});

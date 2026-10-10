@@ -9,6 +9,13 @@ import type {
 import { getProvider, matchLegacyProvider, PROVIDERS } from "./providers";
 import { getExpenseAmountType, getExpenseCategory } from "./expense-types";
 import { CARD_TYPES, getCardType } from "./method-types";
+import { LEDGER_SCHEMA } from "./ledger";
+import {
+  AMOUNT_HISTORY_SCHEMA,
+  applyAmountChange,
+  seedAmountHistory,
+} from "./expense-amount-history";
+import { dateKey } from "../utils/ledger";
 
 const EXPENSE_CATEGORY_COLUMN =
   "categoryCode TEXT CHECK (categoryCode IS NULL OR categoryCode IN ('living', 'subscription'))";
@@ -71,7 +78,9 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS expenses_method_idx ON expenses(methodId);
   CREATE INDEX IF NOT EXISTS methods_order_idx ON payment_methods(kind, sortOrder, id);
   CREATE INDEX IF NOT EXISTS expenses_order_idx ON expenses(sortOrder, id);
-  PRAGMA user_version = 7;
+  ${LEDGER_SCHEMA}
+  ${AMOUNT_HISTORY_SCHEMA}
+  PRAGMA user_version = 9;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -197,7 +206,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 7)
+  if ((version?.user_version ?? 0) > 9)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -246,6 +255,29 @@ export async function initializeDatabase(db: SQLiteDatabase) {
         await db.execAsync("PRAGMA user_version = 7;");
       });
     }
+    if (version.user_version <= 7) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(LEDGER_SCHEMA);
+        await db.execAsync("PRAGMA user_version = 8;");
+      });
+    }
+    if (version.user_version <= 8) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(ledger_entries)",
+        );
+        if (!columns.some((column) => column.name === "amountEntered"))
+          await db.execAsync(
+            "ALTER TABLE ledger_entries ADD COLUMN amountEntered INTEGER NOT NULL DEFAULT 0 CHECK (amountEntered IN (0, 1));",
+          );
+        await db.execAsync(
+          "UPDATE ledger_entries SET amountEntered = 1 WHERE amountTypeCode = 'variable' AND amount IS NOT NULL;",
+        );
+        await db.execAsync(AMOUNT_HISTORY_SCHEMA);
+        await seedAmountHistory(db);
+        await db.execAsync("PRAGMA user_version = 9;");
+      });
+    }
     await db.withTransactionAsync(() => syncProviders(db));
   }
 }
@@ -271,6 +303,7 @@ export async function saveExpense(
   db: SQLiteDatabase,
   input: ExpenseInput,
   id?: number,
+  effectiveDate?: string,
 ) {
   const categoryCode = input.categoryCode ?? null;
   if (categoryCode !== null && !getExpenseCategory(categoryCode))
@@ -288,29 +321,44 @@ export async function saveExpense(
   } else if (input.amount !== null) {
     throw new Error("변동 항목에는 기본 금액을 저장하지 않아요.");
   }
-  if (id !== undefined) {
-    await db.runAsync(
-      "UPDATE expenses SET name = ?, amountTypeCode = ?, amount = ?, chargeDay = ?, methodId = ?, categoryCode = ? WHERE id = ?",
-      input.name,
-      input.amountTypeCode,
-      input.amount,
-      input.chargeDay,
-      input.methodId,
-      categoryCode,
-      id,
-    );
-  } else {
-    await db.runAsync(
-      `INSERT INTO expenses (name, amountTypeCode, amount, chargeDay, methodId, categoryCode, sortOrder)
+  await db.withTransactionAsync(async () => {
+    if (id !== undefined) {
+      const existing = await db.getFirstAsync<Expense>(
+        "SELECT * FROM expenses WHERE id = ?",
+        id,
+      );
+      if (!existing) throw new Error("수정할 고정비를 다시 확인해 주세요.");
+      // Seed before overwriting the template so unvisited earlier months use the old amount.
+      await seedAmountHistory(db);
+      const amountChanged =
+        existing.amountTypeCode !== input.amountTypeCode ||
+        existing.amount !== input.amount;
+      if (amountChanged)
+        await applyAmountChange(db, id, input, effectiveDate ?? dateKey());
+      await db.runAsync(
+        "UPDATE expenses SET name = ?, amountTypeCode = ?, amount = ?, chargeDay = ?, methodId = ?, categoryCode = ? WHERE id = ?",
+        input.name,
+        input.amountTypeCode,
+        input.amount,
+        input.chargeDay,
+        input.methodId,
+        categoryCode,
+        id,
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO expenses (name, amountTypeCode, amount, chargeDay, methodId, categoryCode, sortOrder)
        SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(sortOrder), -1) + 1 FROM expenses`,
-      input.name,
-      input.amountTypeCode,
-      input.amount,
-      input.chargeDay,
-      input.methodId,
-      categoryCode,
-    );
-  }
+        input.name,
+        input.amountTypeCode,
+        input.amount,
+        input.chargeDay,
+        input.methodId,
+        categoryCode,
+      );
+      await seedAmountHistory(db);
+    }
+  });
 }
 
 export async function saveMethod(

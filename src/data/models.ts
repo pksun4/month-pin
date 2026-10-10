@@ -37,3 +37,20 @@ export type MethodInput = Omit<
   providerCode: ProviderCode;
 };
 export type ExpenseInput = Omit<Expense, "id" | "sortOrder">;
+
+export interface LedgerEntry {
+  id: number;
+  month: string;
+  expenseId: number | null;
+  name: string;
+  amountTypeCode: ExpenseAmountTypeCode;
+  categoryCode: ExpenseCategoryCode | null;
+  day: number;
+  amount: number | null;
+  methodKind: MethodKind | null;
+  amountEntered: boolean;
+  providerCode: ProviderCode | null;
+  providerName: string | null;
+  methodName: string | null;
+  cardTypeCode: CardTypeCode | null;
+}

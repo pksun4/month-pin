@@ -19,12 +19,24 @@ export default function SettingsScreen() {
       <View style={s.card}>
         <Text style={s.sectionTitle}>데이터 저장</Text>
         <Text style={s.body}>
-          입력한 고정비와 결제수단은 이 기기에 저장돼요. 앱을 다시 열어도
-          유지돼요.
+          입력한 고정비·결제수단·월별 가계부는 이 기기에 저장돼요. 앱을 다시
+          열어도 유지돼요.
         </Text>
         <Text style={s.caption}>
           현재 별도 백업과 기기 간 동기화는 제공하지 않아요. 앱을 삭제하거나 앱
           데이터를 지우면 기록이 사라질 수 있어요.
+        </Text>
+      </View>
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>가계부 안내</Text>
+        <Text style={s.body}>
+          고정 금액은 자동으로 반영돼요. 변동 항목은 매월 실제 금액을 입력하며,
+          미입력 금액은 합계에 포함되지 않아요.
+        </Text>
+        <Text style={s.caption}>
+          금액을 수정하면 변경 적용일부터 새 금액을 반영해요. 이전 내역과 직접
+          입력한 변동 금액은 유지돼요. 고정비를 삭제해도 저장된 월 내역은 남고,
+          새 고정비는 월을 다시 열면 추가돼요.
         </Text>
       </View>
       <View style={s.card}>

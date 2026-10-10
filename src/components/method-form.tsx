@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import type { MethodKind, PaymentMethod } from "../data/models";
 import { getProvider, type ProviderCode } from "../data/providers";
 import {
@@ -8,9 +8,13 @@ import {
   type CardTypeCode,
 } from "../data/method-types";
 import { useMonthPin } from "../hooks/use-month-pin";
-import { methodLabel, parseDay } from "../utils/expenses";
-import { Button, Choice, Field, s } from "./ui";
+import { parseDay } from "../utils/expenses";
+import { Button, Field, s } from "./ui";
 import { ProviderSelect } from "./provider-select";
+import { FormSegments } from "./form-segments";
+import { FormSelect } from "./form-select";
+import { ChargeDayField } from "./charge-day-field";
+import { ProviderIcon } from "./provider-icon";
 
 export function MethodForm({
   method,
@@ -37,6 +41,20 @@ export function MethodForm({
   const [error, setError] = useState("");
   const submitting = useRef(false);
   const banks = methods.filter((item) => item.kind === "bank");
+  const bankOptions = [
+    { code: null, label: "미지정" },
+    ...banks.map((bank) => ({
+      code: bank.id,
+      label: bank.name,
+      description: bank.provider,
+      icon: <ProviderIcon code={bank.providerCode} size={24} />,
+    })),
+  ];
+  const invalidDay =
+    kind === "card" &&
+    cardTypeCode === "credit" &&
+    day.length > 0 &&
+    parseDay(day) === null;
 
   function changeKind(nextKind: MethodKind) {
     if (nextKind === kind) return;
@@ -91,18 +109,34 @@ export function MethodForm({
 
   return (
     <>
-      {!method && (
-        <View style={s.row}>
-          {METHOD_KINDS.map((option) => (
-            <View key={option.code} style={s.flex}>
-              <Choice
-                label={option.label}
-                selected={kind === option.code}
-                onPress={() => changeKind(option.code)}
-              />
-            </View>
-          ))}
+      {(!method || kind === "card") && (
+        <View style={styles.selections}>
+          {!method && (
+            <FormSegments
+              label="종류"
+              options={METHOD_KINDS}
+              value={kind}
+              disabled={busy}
+              onChange={changeKind}
+            />
+          )}
+          {kind === "card" && (
+            <FormSegments
+              label="카드 종류"
+              options={CARD_TYPES}
+              value={cardTypeCode}
+              disabled={busy}
+              onChange={(value) => {
+                setCardTypeCode(value);
+                if (value === "debit") setDay("");
+                setError("");
+              }}
+            />
+          )}
         </View>
+      )}
+      {method && kind === "card" && method.cardTypeCode === null && (
+        <Text style={s.caption}>기존 카드의 종류를 선택해 주세요.</Text>
       )}
       <ProviderSelect
         key={kind}
@@ -130,66 +164,33 @@ export function MethodForm({
       />
       {kind === "card" && (
         <>
-          <View
-            accessibilityRole="radiogroup"
-            accessibilityLabel="카드 종류"
-            style={s.choices}
-          >
-            <Text style={s.fieldLabel}>카드 종류</Text>
-            <View style={s.row}>
-              {CARD_TYPES.map((type) => (
-                <View key={type.code} style={s.flex}>
-                  <Choice
-                    label={type.label}
-                    selected={cardTypeCode === type.code}
-                    disabled={busy}
-                    onPress={() => {
-                      setCardTypeCode(type.code);
-                      if (type.code === "debit") setDay("");
-                      setError("");
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
-            {method && method.cardTypeCode === null && (
-              <Text style={s.caption}>기존 카드의 종류를 선택해 주세요.</Text>
-            )}
-          </View>
-          <View style={s.choices}>
-            <Text style={s.fieldLabel}>
-              {cardTypeCode === "debit"
-                ? "연결 통장 (선택)"
-                : "카드 대금 출금 통장 (선택)"}
-            </Text>
-            <Choice
-              label="미지정"
-              selected={bankId === null}
-              onPress={() => setBankId(null)}
-            />
-            {banks.map((bank) => (
-              <Choice
-                key={bank.id}
-                label={methodLabel(bank)}
-                selected={bankId === bank.id}
-                onPress={() => setBankId(bank.id)}
-              />
-            ))}
-            {banks.length === 0 && (
-              <Text style={s.caption}>
-                통장을 먼저 등록하면 여기에서 선택할 수 있어요.
-              </Text>
-            )}
-          </View>
+          <FormSelect
+            label={cardTypeCode === "debit" ? "연결 통장" : "출금 통장"}
+            options={bankOptions}
+            value={bankId}
+            inlineLabel
+            disabled={busy}
+            onChange={(value) => {
+              setBankId(value);
+              setError("");
+            }}
+          />
+          <Text style={s.caption}>
+            {banks.length === 0
+              ? "통장을 먼저 등록하면 선택할 수 있어요. 연결은 선택 사항이에요."
+              : "통장 연결은 선택 사항이에요. 별명이나 은행명으로 검색할 수 있어요."}
+          </Text>
           {cardTypeCode === "credit" && (
             <>
-              <Field
-                label="카드 대금 출금일 (선택)"
+              <ChargeDayField
+                label="출금일"
+                optional
                 value={day}
-                onChangeText={setDay}
-                placeholder="1 ~ 31"
-                numeric
-                maxLength={2}
+                onChange={(value) => {
+                  setDay(value);
+                  setError("");
+                }}
+                disabled={busy}
               />
               <Text style={s.caption}>
                 카드 대금이 통장에서 빠져나가는 날짜예요. 고정비의 카드 승인일과
@@ -206,7 +207,7 @@ export function MethodForm({
       ) : null}
       <Button
         label={busy ? "저장 중…" : "저장"}
-        disabled={busy}
+        disabled={busy || invalidDay}
         onPress={() => {
           void submit();
         }}
@@ -214,3 +215,5 @@ export function MethodForm({
     </>
   );
 }
+
+const styles = StyleSheet.create({ selections: { gap: 4 } });

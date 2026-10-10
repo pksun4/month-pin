@@ -136,6 +136,7 @@ export function ListReorderButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.reorderAction,
+        !active && styles.reorderIconAction,
         (pressed || disabled) && styles.dimmed,
       ]}
     >
@@ -243,5 +244,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.blue,
   },
+  // Align the visible icon to the content edge while retaining its 44pt target.
+  reorderIconAction: { marginRight: -16 },
   dimmed: { opacity: 0.5 },
 });

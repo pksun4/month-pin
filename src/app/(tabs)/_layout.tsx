@@ -16,6 +16,12 @@ const tabs: {
     activeIcon: "receipt",
   },
   {
+    name: "ledger",
+    title: "가계부",
+    icon: "calendar-outline",
+    activeIcon: "calendar",
+  },
+  {
     name: "wallet",
     title: "결제수단",
     icon: "wallet-outline",
