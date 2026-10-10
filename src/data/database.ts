@@ -7,7 +7,12 @@ import type {
   PaymentMethod,
 } from "./models";
 import { getProvider, matchLegacyProvider, PROVIDERS } from "./providers";
-import { getExpenseAmountType, getExpenseCategory } from "./expense-types";
+import {
+  getExpenseAmountType,
+  getExpenseCategory,
+  EXPENSE_STATUS_OPTIONS,
+  type ExpenseStatusCode,
+} from "./expense-types";
 import { CARD_TYPES, getCardType } from "./method-types";
 import { LEDGER_SCHEMA } from "./ledger";
 import {
@@ -15,7 +20,14 @@ import {
   applyAmountChange,
   seedAmountHistory,
 } from "./expense-amount-history";
-import { dateKey } from "../utils/ledger";
+import { monthKey, isValidMonth } from "../utils/ledger";
+
+const START_MONTH_COLUMN =
+  "startMonth TEXT NOT NULL DEFAULT '1000-01' CHECK (startMonth GLOB '[1-9][0-9][0-9][0-9]-[0-1][0-9]' AND CAST(substr(startMonth, 6, 2) AS INTEGER) BETWEEN 1 AND 12)";
+const DELETED_COLUMN =
+  "isDeleted INTEGER NOT NULL DEFAULT 0 CHECK (isDeleted IN (0, 1))";
+const END_MONTH_COLUMN =
+  "endMonth TEXT CHECK (endMonth IS NULL OR (endMonth GLOB '[1-9][0-9][0-9][0-9]-[0-1][0-9]' AND CAST(substr(endMonth, 6, 2) AS INTEGER) BETWEEN 1 AND 12))";
 
 const EXPENSE_CATEGORY_COLUMN =
   "categoryCode TEXT CHECK (categoryCode IS NULL OR categoryCode IN ('living', 'subscription'))";
@@ -64,7 +76,7 @@ function expenseSchema(table: "expenses" | "expenses_v4", current = true) {
     amount INTEGER,
     chargeDay INTEGER NOT NULL CHECK (chargeDay BETWEEN 1 AND 31),
     methodId INTEGER REFERENCES payment_methods(id) ON DELETE SET NULL,
-    ${current ? `sortOrder INTEGER NOT NULL DEFAULT 0 CHECK (sortOrder >= 0), ${EXPENSE_CATEGORY_COLUMN},` : ""}
+    ${current ? `sortOrder INTEGER NOT NULL DEFAULT 0 CHECK (sortOrder >= 0), ${EXPENSE_CATEGORY_COLUMN}, ${START_MONTH_COLUMN}, ${END_MONTH_COLUMN}, ${DELETED_COLUMN},` : ""}
     CHECK ((amountTypeCode = 'fixed' AND amount IS NOT NULL
       AND typeof(amount) = 'integer' AND amount BETWEEN 1 AND 999999999)
       OR (amountTypeCode = 'variable' AND amount IS NULL))
@@ -80,7 +92,7 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS expenses_order_idx ON expenses(sortOrder, id);
   ${LEDGER_SCHEMA}
   ${AMOUNT_HISTORY_SCHEMA}
-  PRAGMA user_version = 9;
+  PRAGMA user_version = 12;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -206,7 +218,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 9)
+  if ((version?.user_version ?? 0) > 12)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -278,14 +290,112 @@ export async function initializeDatabase(db: SQLiteDatabase) {
         await db.execAsync("PRAGMA user_version = 9;");
       });
     }
+    if (version.user_version <= 9) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(ledger_entries)",
+        );
+        if (!columns.some((column) => column.name === "methodId"))
+          await db.execAsync(
+            "ALTER TABLE ledger_entries ADD COLUMN methodId INTEGER CHECK (methodId IS NULL OR methodId > 0);",
+          );
+        // Match only a unique, exact snapshot; duplicate names must never be guessed.
+        await db.execAsync(`UPDATE ledger_entries SET methodId = (
+          SELECT m.id FROM payment_methods m
+          JOIN expenses e ON e.methodId = m.id AND e.id = ledger_entries.expenseId
+          WHERE m.kind = ledger_entries.methodKind AND m.name = ledger_entries.methodName
+            AND m.providerCode IS ledger_entries.providerCode
+        ) WHERE methodId IS NULL AND EXISTS (
+          SELECT 1 FROM expenses e JOIN payment_methods m ON m.id = e.methodId
+          WHERE e.id = ledger_entries.expenseId AND m.kind = ledger_entries.methodKind
+            AND m.name = ledger_entries.methodName AND m.providerCode IS ledger_entries.providerCode
+        ) AND (
+          SELECT COUNT(*) FROM payment_methods m
+          WHERE m.kind = ledger_entries.methodKind AND m.name = ledger_entries.methodName
+            AND m.providerCode IS ledger_entries.providerCode
+        ) = 1;
+              PRAGMA user_version = 10;`);
+      });
+    }
+    if (version.user_version <= 10) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(expenses)",
+        );
+        if (!columns.some((column) => column.name === "startMonth"))
+          await db.execAsync(
+            `ALTER TABLE expenses ADD COLUMN ${START_MONTH_COLUMN};`,
+          );
+        if (!columns.some((column) => column.name === "endMonth"))
+          await db.execAsync(
+            `ALTER TABLE expenses ADD COLUMN ${END_MONTH_COLUMN};`,
+          );
+        const historyColumns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(expense_amount_versions)",
+        );
+        if (historyColumns.some((column) => column.name === "effectiveDate")) {
+          await db.execAsync(
+            AMOUNT_HISTORY_SCHEMA.replace(
+              "expense_amount_versions (",
+              "expense_amount_versions_v11 (",
+            ),
+          );
+          // Keep the latest setting when several date changes occurred in the same month.
+          // Already recorded monthly actuals and automatic amounts remain untouched.
+          await db.execAsync(`
+            INSERT INTO expense_amount_versions_v11 (expenseId, effectiveMonth, amountTypeCode, amount)
+            SELECT v.expenseId, substr(v.effectiveDate, 1, 7), v.amountTypeCode, v.amount
+            FROM expense_amount_versions v
+            WHERE v.effectiveDate = (SELECT MAX(other.effectiveDate) FROM expense_amount_versions other
+              WHERE other.expenseId = v.expenseId AND substr(other.effectiveDate, 1, 7) = substr(v.effectiveDate, 1, 7));
+            DROP TABLE expense_amount_versions;
+            ALTER TABLE expense_amount_versions_v11 RENAME TO expense_amount_versions;
+          `);
+        }
+        await db.execAsync("PRAGMA user_version = 11;");
+      });
+    }
+    if (version.user_version <= 11) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(expenses)",
+        );
+        if (!columns.some((column) => column.name === "isDeleted"))
+          await db.execAsync(
+            `ALTER TABLE expenses ADD COLUMN ${DELETED_COLUMN};`,
+          );
+        // Retired monthly_card_usage tables and values are preserved if an older app created them.
+        await db.execAsync("PRAGMA user_version = 12;");
+      });
+    }
     await db.withTransactionAsync(() => syncProviders(db));
   }
 }
 
-export function readExpenses(db: SQLiteDatabase) {
-  return db.getAllAsync<Expense>(
-    "SELECT * FROM expenses ORDER BY chargeDay, id DESC",
-  );
+export async function readExpenses(
+  db: SQLiteDatabase,
+  status: ExpenseStatusCode = "active",
+) {
+  if (!EXPENSE_STATUS_OPTIONS.some((option) => option.code === status))
+    throw new Error("고정비 상태를 다시 확인해 주세요.");
+  const expenses = await db.getAllAsync<
+    Omit<Expense, "isDeleted"> & { isDeleted?: number }
+  >("SELECT * FROM expenses ORDER BY chargeDay, id DESC");
+  return expenses
+    .filter(
+      (expense) =>
+        !expense.isDeleted &&
+        (status === "active"
+          ? expense.endMonth == null
+          : expense.endMonth != null),
+    )
+    .map((expense) =>
+      Object.assign(expense, {
+        startMonth: expense.startMonth ?? "1000-01",
+        endMonth: expense.endMonth ?? null,
+        isDeleted: expense.isDeleted === 1,
+      }),
+    );
 }
 
 export function readMethods(db: SQLiteDatabase) {
@@ -303,7 +413,8 @@ export async function saveExpense(
   db: SQLiteDatabase,
   input: ExpenseInput,
   id?: number,
-  effectiveDate?: string,
+  effectiveMonth?: string,
+  renewalSourceId?: number,
 ) {
   const categoryCode = input.categoryCode ?? null;
   if (categoryCode !== null && !getExpenseCategory(categoryCode))
@@ -327,34 +438,63 @@ export async function saveExpense(
         "SELECT * FROM expenses WHERE id = ?",
         id,
       );
-      if (!existing) throw new Error("수정할 고정비를 다시 확인해 주세요.");
+      if (!existing || existing.endMonth !== null || existing.isDeleted)
+        throw new Error("수정할 고정비를 다시 확인해 주세요.");
+      const startMonth = input.startMonth ?? existing.startMonth;
+      if (!isValidMonth(startMonth))
+        throw new Error("시작 월을 다시 확인해 주세요.");
       // Seed before overwriting the template so unvisited earlier months use the old amount.
       await seedAmountHistory(db);
       const amountChanged =
         existing.amountTypeCode !== input.amountTypeCode ||
         existing.amount !== input.amount;
       if (amountChanged)
-        await applyAmountChange(db, id, input, effectiveDate ?? dateKey());
+        await applyAmountChange(db, id, input, effectiveMonth ?? monthKey());
       await db.runAsync(
-        "UPDATE expenses SET name = ?, amountTypeCode = ?, amount = ?, chargeDay = ?, methodId = ?, categoryCode = ? WHERE id = ?",
+        "UPDATE expenses SET name = ?, amountTypeCode = ?, amount = ?, chargeDay = ?, methodId = ?, categoryCode = ?, startMonth = ? WHERE id = ?",
         input.name,
         input.amountTypeCode,
         input.amount,
         input.chargeDay,
         input.methodId,
         categoryCode,
+        startMonth,
         id,
       );
+      if (startMonth !== existing.startMonth)
+        await db.runAsync(
+          "DELETE FROM ledger_entries WHERE expenseId = ? AND month < ? AND amountEntered = 0",
+          id,
+          startMonth,
+        );
     } else {
+      const startMonth = input.startMonth ?? monthKey();
+      if (!isValidMonth(startMonth))
+        throw new Error("시작 월을 다시 확인해 주세요.");
+      if (renewalSourceId !== undefined) {
+        if (!Number.isSafeInteger(renewalSourceId) || renewalSourceId < 1)
+          throw new Error("다시 등록할 고정비를 확인해 주세요.");
+        const source = await db.getFirstAsync<Expense>(
+          "SELECT * FROM expenses WHERE id = ?",
+          renewalSourceId,
+        );
+        if (!source || source.isDeleted || source.endMonth === null)
+          throw new Error("종료 목록의 고정비를 선택해 주세요.");
+        if (startMonth <= source.endMonth)
+          throw new Error(
+            "새 시작 월은 이전 마지막 반영 월보다 이후로 선택해 주세요.",
+          );
+      }
       await db.runAsync(
-        `INSERT INTO expenses (name, amountTypeCode, amount, chargeDay, methodId, categoryCode, sortOrder)
-       SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(sortOrder), -1) + 1 FROM expenses`,
+        `INSERT INTO expenses (name, amountTypeCode, amount, chargeDay, methodId, categoryCode, startMonth, sortOrder)
+       SELECT ?, ?, ?, ?, ?, ?, ?, COALESCE(MAX(sortOrder), -1) + 1 FROM expenses`,
         input.name,
         input.amountTypeCode,
         input.amount,
         input.chargeDay,
         input.methodId,
         categoryCode,
+        startMonth,
       );
       await seedAmountHistory(db);
     }
@@ -449,8 +589,59 @@ export async function reorderMethods(
   });
 }
 
+export async function endExpense(
+  db: SQLiteDatabase,
+  id: number,
+  endMonth: string,
+) {
+  if (
+    !Number.isSafeInteger(id) ||
+    id < 1 ||
+    !isValidMonth(endMonth) ||
+    endMonth < monthKey()
+  )
+    throw new Error("마지막 반영 월은 이번 달 이후로 선택해 주세요.");
+  await db.withTransactionAsync(async () => {
+    const result = await db.runAsync(
+      "UPDATE expenses SET endMonth = ? WHERE id = ? AND endMonth IS NULL AND isDeleted = 0",
+      endMonth,
+      id,
+    );
+    if (!result.changes) throw new Error("종료할 고정비를 다시 확인해 주세요.");
+    // Preserve every manual actual, including zero, and all occurrences through the last month.
+    await db.runAsync(
+      "DELETE FROM ledger_entries WHERE expenseId = ? AND month > ? AND amountEntered = 0",
+      id,
+      endMonth,
+    );
+  });
+}
+
 export async function deleteExpense(db: SQLiteDatabase, id: number) {
-  await db.runAsync("DELETE FROM expenses WHERE id = ?", id);
+  if (!Number.isSafeInteger(id) || id < 1)
+    throw new Error("삭제할 고정비를 다시 확인해 주세요.");
+  await db.withTransactionAsync(async () => {
+    const expense = await db.getFirstAsync<Expense>(
+      "SELECT * FROM expenses WHERE id = ?",
+      id,
+    );
+    if (!expense || expense.isDeleted)
+      throw new Error("삭제할 고정비를 다시 확인해 주세요.");
+    const cutoff =
+      expense.endMonth === null || expense.endMonth > monthKey()
+        ? monthKey()
+        : expense.endMonth;
+    await db.runAsync(
+      "UPDATE expenses SET isDeleted = 1, endMonth = ? WHERE id = ?",
+      cutoff,
+      id,
+    );
+    await db.runAsync(
+      "DELETE FROM ledger_entries WHERE expenseId = ? AND month > ? AND amountEntered = 0",
+      id,
+      cutoff,
+    );
+  });
 }
 
 export async function reorderExpenses(
@@ -459,7 +650,7 @@ export async function reorderExpenses(
 ) {
   await db.withTransactionAsync(async () => {
     const current = await db.getAllAsync<{ id: number }>(
-      "SELECT id FROM expenses",
+      "SELECT id FROM expenses WHERE endMonth IS NULL AND isDeleted = 0",
     );
     const currentIds = new Set(current.map((expense) => expense.id));
     if (

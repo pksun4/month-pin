@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppText as Text } from "./typography";
+import { Pressable, StyleSheet, View } from "react-native";
 import type { LedgerEntry } from "../data/models";
 import { calendarDays, dailyLedger, monthKey } from "../utils/ledger";
 import { money } from "../utils/expenses";
@@ -11,15 +12,11 @@ export function LedgerCalendar({
   entries,
   selectedDay,
   onSelect,
-  minimumDate,
-  showLegend = true,
 }: {
   month: string;
   entries: readonly LedgerEntry[];
   selectedDay: number;
   onSelect: (day: number) => void;
-  minimumDate?: string;
-  showLegend?: boolean;
 }) {
   const days = calendarDays(month);
   const totals = dailyLedger(entries);
@@ -47,20 +44,15 @@ export function LedgerCalendar({
             if (day === null) return <View key={column} style={styles.blank} />;
             const summary = totals.get(day);
             const selected = day === selectedDay;
-            const disabled =
-              !!minimumDate &&
-              `${month}-${String(day).padStart(2, "0")}` < minimumDate;
             return (
               <Pressable
                 key={column}
                 accessibilityRole="button"
                 accessibilityLabel={`${month.replace("-", "년 ")}월 ${day}일${day === today ? ", 오늘" : ""}, ${summary?.count ?? 0}건, ${money(summary?.total ?? 0)}${summary?.pending ? `, 금액 미입력 ${summary.pending}건` : ""}`}
-                accessibilityState={{ selected, disabled }}
-                disabled={disabled}
+                accessibilityState={{ selected }}
                 onPress={() => onSelect(day)}
                 style={({ pressed }) => [
                   styles.cell,
-                  disabled && styles.disabled,
                   selected && styles.selected,
                   pressed && { opacity: 0.65 },
                 ]}
@@ -94,15 +86,13 @@ export function LedgerCalendar({
           })}
         </View>
       ))}
-      {showLegend && (
-        <View style={styles.legend}>
-          <Text style={styles.legendText}>날짜별 합계 · 원</Text>
-          <View style={styles.legendItem}>
-            <View style={styles.dot} />
-            <Text style={styles.legendText}>금액 미입력</Text>
-          </View>
+      <View style={styles.legend}>
+        <Text style={styles.legendText}>날짜별 합계 · 원</Text>
+        <View style={styles.legendItem}>
+          <View style={styles.dot} />
+          <Text style={styles.legendText}>금액 미입력</Text>
         </View>
-      )}
+      </View>
     </View>
   );
 }
@@ -134,7 +124,6 @@ const styles = StyleSheet.create({
     borderRadius: 9,
   },
   selected: { backgroundColor: colors.softBlue },
-  disabled: { opacity: 0.3 },
   day: { fontSize: 13, lineHeight: 20, fontWeight: "500", color: colors.ink },
   sunday: { color: colors.red },
   saturday: { color: colors.blue },

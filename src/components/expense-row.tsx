@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppText as Text } from "./typography";
+import { Pressable, StyleSheet, View } from "react-native";
 import type { Expense } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { expenseAmountLabel, methodLabel } from "../utils/expenses";
@@ -7,6 +8,7 @@ import { colors } from "./ui";
 import { ProviderIcon } from "./provider-icon";
 import { METHOD_KINDS } from "../data/method-types";
 import { ReorderHandle, type ReorderControls } from "./reorder-handle";
+import { formatMonth } from "../utils/ledger";
 import { ExpenseDayBadge } from "./expense-day-badge";
 
 export function ExpenseRow({
@@ -62,6 +64,7 @@ export function ExpenseRow({
         <View style={styles.methodLine}>
           {method && <ProviderIcon code={method.providerCode} size={18} />}
           <Text numberOfLines={1} style={styles.method}>
+            {expense.endMonth ? `${formatMonth(expense.endMonth)}까지 · ` : ""}
             {method ? (
               <>
                 <Text style={styles.methodKind}>{methodKindLabel}</Text>

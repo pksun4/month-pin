@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, type IconName } from "../../components/ui";
+import { bodyFontStyle } from "../../components/typography";
 
 const tabs: {
   name: string;
@@ -14,12 +15,6 @@ const tabs: {
     title: "고정비",
     icon: "receipt-outline",
     activeIcon: "receipt",
-  },
-  {
-    name: "ledger",
-    title: "가계부",
-    icon: "calendar-outline",
-    activeIcon: "calendar",
   },
   {
     name: "wallet",
@@ -47,7 +42,10 @@ export default function TabLayout() {
           borderTopColor: colors.line,
           paddingTop: 8,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarLabelStyle: [
+          { fontSize: 11, fontWeight: "600" },
+          bodyFontStyle("600"),
+        ],
         tabBarHideOnKeyboard: true,
       }}
     >

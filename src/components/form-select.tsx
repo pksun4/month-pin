@@ -1,3 +1,4 @@
+import { AppText as Text, AppTextInput as TextInput } from "./typography";
 import { useState, type ReactNode } from "react";
 import {
   FlatList,
@@ -7,8 +8,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";

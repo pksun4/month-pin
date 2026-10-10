@@ -1,5 +1,6 @@
+import { AppText as Text } from "./typography";
 import { useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import type { MethodKind, PaymentMethod } from "../data/models";
 import { getProvider, type ProviderCode } from "../data/providers";
 import {

@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppText as Text } from "./typography";
+import { Pressable, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { LedgerEntry } from "../data/models";
 import { METHOD_KINDS } from "../data/method-types";

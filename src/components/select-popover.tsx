@@ -1,3 +1,4 @@
+import { AppText as Text } from "./typography";
 import { useEffect, useRef, useState } from "react";
 import {
   Dimensions,
@@ -5,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from "react-native";

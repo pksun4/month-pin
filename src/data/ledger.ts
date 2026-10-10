@@ -20,6 +20,7 @@ export const LEDGER_SCHEMA = `
     amount INTEGER CHECK (amount IS NULL OR (typeof(amount) = 'integer' AND amount BETWEEN 0 AND 999999999)),
     amountEntered INTEGER NOT NULL DEFAULT 0 CHECK (amountEntered IN (0, 1)),
     methodKind TEXT CHECK (methodKind IS NULL OR methodKind IN (${codes(METHOD_KINDS)})),
+    methodId INTEGER CHECK (methodId IS NULL OR methodId > 0),
     providerCode TEXT REFERENCES payment_providers(code),
     providerName TEXT,
     methodName TEXT,
@@ -36,26 +37,35 @@ export const LEDGER_SCHEMA = `
 export async function loadLedgerMonth(db: SQLiteDatabase, month: string) {
   const lastDay = daysInMonth(month);
   await db.runAsync(
+    `DELETE FROM ledger_entries WHERE month = ? AND amountEntered = 0
+      AND expenseId IN (SELECT id FROM expenses
+        WHERE startMonth > ? OR (endMonth IS NOT NULL AND endMonth < ?))`,
+    month,
+    month,
+    month,
+  );
+  await db.runAsync(
     `INSERT INTO ledger_entries
       (month, expenseId, name, amountTypeCode, categoryCode, day, amount,
-       methodKind, providerCode, providerName, methodName, cardTypeCode)
+       methodKind, methodId, providerCode, providerName, methodName, cardTypeCode)
      SELECT ?, e.id, e.name, COALESCE(v.amountTypeCode, e.amountTypeCode), e.categoryCode,
-       MIN(e.chargeDay, ?), CASE WHEN v.id IS NULL THEN e.amount ELSE v.amount END, m.kind, m.providerCode,
+       MIN(e.chargeDay, ?), CASE WHEN v.id IS NULL THEN e.amount ELSE v.amount END, m.kind, m.id, m.providerCode,
        COALESCE(p.name, m.legacyProvider), m.name, m.cardTypeCode
      FROM expenses e
      LEFT JOIN expense_amount_versions v ON v.id = (
        SELECT id FROM expense_amount_versions
-       WHERE expenseId = e.id AND effectiveDate <= ? || '-' || printf('%02d', MIN(e.chargeDay, ?))
-       ORDER BY effectiveDate DESC LIMIT 1
+       WHERE expenseId = e.id AND effectiveMonth <= ?
+       ORDER BY effectiveMonth DESC LIMIT 1
      )
      LEFT JOIN payment_methods m ON m.id = e.methodId
      LEFT JOIN payment_providers p ON p.code = m.providerCode
-     WHERE TRUE
+     WHERE e.startMonth <= ? AND (e.endMonth IS NULL OR e.endMonth >= ?)
      ON CONFLICT(month, expenseId) DO NOTHING`,
     month,
     lastDay,
     month,
-    lastDay,
+    month,
+    month,
   );
   return readLedgerMonth(db, month);
 }

@@ -28,6 +28,9 @@ export interface Expense {
   chargeDay: number;
   methodId: number | null;
   sortOrder: number;
+  startMonth: string;
+  endMonth: string | null;
+  isDeleted: boolean;
 }
 
 export type MethodInput = Omit<
@@ -36,7 +39,12 @@ export type MethodInput = Omit<
 > & {
   providerCode: ProviderCode;
 };
-export type ExpenseInput = Omit<Expense, "id" | "sortOrder">;
+export type ExpenseInput = Omit<
+  Expense,
+  "id" | "sortOrder" | "startMonth" | "endMonth" | "isDeleted"
+> & {
+  startMonth?: string;
+};
 
 export interface LedgerEntry {
   id: number;
@@ -48,6 +56,7 @@ export interface LedgerEntry {
   day: number;
   amount: number | null;
   methodKind: MethodKind | null;
+  methodId: number | null;
   amountEntered: boolean;
   providerCode: ProviderCode | null;
   providerName: string | null;

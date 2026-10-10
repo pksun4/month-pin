@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { AppText as Text } from "../../components/typography";
+import { View } from "react-native";
 import { Header, Screen, s } from "../../components/ui";
 
 export default function SettingsScreen() {
@@ -19,7 +20,7 @@ export default function SettingsScreen() {
       <View style={s.card}>
         <Text style={s.sectionTitle}>데이터 저장</Text>
         <Text style={s.body}>
-          입력한 고정비·결제수단·월별 가계부는 이 기기에 저장돼요. 앱을 다시
+          입력한 고정비·결제수단·월별 금액은 이 기기에 저장돼요. 앱을 다시
           열어도 유지돼요.
         </Text>
         <Text style={s.caption}>
@@ -28,15 +29,18 @@ export default function SettingsScreen() {
         </Text>
       </View>
       <View style={s.card}>
-        <Text style={s.sectionTitle}>가계부 안내</Text>
+        <Text style={s.sectionTitle}>고정비 캘린더 안내</Text>
         <Text style={s.body}>
-          고정 금액은 자동으로 반영돼요. 변동 항목은 매월 실제 금액을 입력하며,
+          고정비 제목 옆 아이콘으로 목록과 캘린더를 전환할 수 있어요. 고정
+          금액은 자동으로 반영돼요. 변동 항목은 매월 실제 금액을 입력하며,
           미입력 금액은 합계에 포함되지 않아요.
         </Text>
         <Text style={s.caption}>
-          금액을 수정하면 변경 적용일부터 새 금액을 반영해요. 이전 내역과 직접
-          입력한 변동 금액은 유지돼요. 고정비를 삭제해도 저장된 월 내역은 남고,
-          새 고정비는 월을 다시 열면 추가돼요.
+          금액을 수정하면 변경 적용 월부터 새 금액을 반영해요. 이전 달과 직접
+          입력한 실제 금액은 유지돼요. 새 고정비는 시작 월부터 표시하고, 종료한
+          고정비는 마지막 반영 월까지 표시해요. 종료한 항목은 목록의 ‘종료’
+          상태에서 다시 등록할 수 있어요. 삭제하면 진행 중·종료 목록에서
+          제외되지만 기존 월 기록과 직접 입력한 실제 금액은 유지돼요.
         </Text>
       </View>
       <View style={s.card}>

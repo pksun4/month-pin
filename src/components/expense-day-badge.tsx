@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from "react-native";
+import { AppText as Text } from "./typography";
+import { StyleSheet, View } from "react-native";
 
 export function ExpenseDayBadge({ day }: { day: number }) {
   return (

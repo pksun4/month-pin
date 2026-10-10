@@ -1,5 +1,6 @@
+import { AppText as Text } from "../../components/typography";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { ReorderableList } from "../../components/reorderable-list";
 import type { MethodKind, PaymentMethod } from "../../data/models";

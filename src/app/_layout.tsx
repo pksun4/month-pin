@@ -1,6 +1,8 @@
+import { AppText as Text, FONT_ASSETS } from "../components/typography";
 import { Component, Suspense, type ErrorInfo, type ReactNode } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { Stack } from "expo-router";
+import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { SQLiteProvider } from "expo-sqlite";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -52,6 +54,14 @@ class StorageBoundary extends Component<
 }
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts(FONT_ASSETS);
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={[s.screen, s.center]}>
+        <ActivityIndicator color={colors.blue} />
+      </View>
+    );
+  }
   return (
     <GestureHandlerRootView style={s.flex}>
       <SafeAreaProvider>

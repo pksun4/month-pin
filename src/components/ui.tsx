@@ -1,3 +1,4 @@
+import { AppText as Text, AppTextInput as TextInput } from "./typography";
 import type { ComponentProps, ReactNode } from "react";
 import type { StyleProp, TextStyle } from "react-native";
 import {
@@ -9,8 +10,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -274,7 +273,7 @@ export const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.8,
   },
-  headerTitle: { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerTitle: { flexDirection: "row", alignItems: "center", gap: 7 },
   caption: { color: colors.muted, fontSize: 14, lineHeight: 22, marginTop: 6 },
   body: { color: colors.ink, fontSize: 15, lineHeight: 23 },
   sectionTitle: {

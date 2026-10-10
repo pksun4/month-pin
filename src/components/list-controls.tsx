@@ -1,5 +1,6 @@
+import { AppText as Text } from "./typography";
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { money } from "../utils/expenses";
 import { colors } from "./ui";
@@ -55,14 +56,20 @@ export function ListSummary({
   amount,
 }: {
   countLabel: string;
-  amount: number;
+  amount?: number;
 }) {
   return (
     <View style={styles.summary}>
       <Text style={styles.count}>{countLabel}</Text>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.summaryAmount}>
-        고정 합계 {money(amount)}
-      </Text>
+      {amount !== undefined && (
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          style={styles.summaryAmount}
+        >
+          고정 합계 {money(amount)}
+        </Text>
+      )}
     </View>
   );
 }

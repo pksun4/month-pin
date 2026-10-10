@@ -1,9 +1,13 @@
+import { AppText as Text } from "../../components/typography";
 import { useCallback, useState } from "react";
-import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { isLoaded } from "expo-font";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../../hooks/use-month-pin";
-import { money, monthlyTotal, nextChargeDate } from "../../utils/expenses";
+import { money, nextChargeDate } from "../../utils/expenses";
+import { ledgerSummary, monthKey } from "../../utils/ledger";
+import { useLedgerMonth } from "../../hooks/use-ledger-month";
 import { ExpenseRow } from "../../components/expense-row";
 import { BrandLogo } from "../../components/brand-logo";
 import { Button, colors, Empty, Header, Screen, s } from "../../components/ui";
@@ -11,13 +15,33 @@ import { Button, colors, Empty, Header, Screen, s } from "../../components/ui";
 export default function HomeScreen() {
   const { expenses, methods } = useMonthPin();
   const [now, setNow] = useState(() => new Date());
+  const { entries, loading, error, retry } = useLedgerMonth(monthKey(now));
+  const summary = ledgerSummary(entries);
   useFocusEffect(
     useCallback(() => {
-      setNow(new Date());
+      let timer: ReturnType<typeof setTimeout>;
+      function updateDate() {
+        const current = new Date();
+        setNow(current);
+        clearTimeout(timer);
+        const midnight = new Date(
+          current.getFullYear(),
+          current.getMonth(),
+          current.getDate() + 1,
+        );
+        timer = setTimeout(
+          updateDate,
+          midnight.getTime() - current.getTime() + 50,
+        );
+      }
+      updateDate();
       const listener = AppState.addEventListener("change", (state) => {
-        if (state === "active") setNow(new Date());
+        if (state === "active") updateDate();
       });
-      return () => listener.remove();
+      return () => {
+        clearTimeout(timer);
+        listener.remove();
+      };
     }, []),
   );
   const upcoming = expenses
@@ -34,20 +58,43 @@ export default function HomeScreen() {
         title="MonthPin"
         description="매달 나가는 돈을 한눈에"
         titleLeading={<BrandLogo />}
-        titleStyle={styles.brandTitle}
+        titleStyle={[
+          styles.brandTitle,
+          isLoaded("Quicksand-Bold") && styles.brandFont,
+        ]}
       />
       <View style={s.hero}>
         <View style={s.between}>
-          <Text style={s.heroLabel}>고정 금액 합계 · 월 기준</Text>
+          <Text style={s.heroLabel}>{now.getMonth() + 1}월 고정비 합계</Text>
           <Ionicons name="pin-outline" size={24} color={colors.white} />
         </View>
         <Text adjustsFontSizeToFit numberOfLines={1} style={s.heroAmount}>
-          {money(monthlyTotal(expenses))}
+          {loading
+            ? "불러오는 중…"
+            : error
+              ? "확인 필요"
+              : money(summary.total)}
         </Text>
         <Text style={s.heroFooter}>
-          고정비 {expenses.length}개 · 결제수단 {methods.length}개{"\n"}등록한
-          고정 금액만 합산해요. 변동 항목은 제외돼요.
+          {loading || error
+            ? "이번 달 캘린더 내역으로 계산해요."
+            : `반영 ${summary.count}건 · 결제수단 ${methods.length}개\n고정 금액 + 입력한 변동 금액`}
         </Text>
+        {!loading && !error && summary.pending > 0 && (
+          <View style={styles.pendingBadge}>
+            <Text style={styles.pendingLabel}>
+              미입력 {summary.pending}건 · 합계에서 제외
+            </Text>
+          </View>
+        )}
+        {error && (
+          <>
+            <Text accessibilityRole="alert" style={s.heroFooter}>
+              {error}
+            </Text>
+            <Button label="다시 시도" secondary onPress={retry} />
+          </>
+        )}
       </View>
       <View style={s.between}>
         <Text style={s.sectionTitle}>다가오는 결제</Text>
@@ -104,10 +151,27 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  pendingBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.softOrange,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  pendingLabel: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: colors.orangeInk,
+  },
   brandTitle: {
     fontSize: 26,
     lineHeight: 32,
     fontWeight: "700",
-    letterSpacing: -0.6,
+    letterSpacing: 0.2,
+  },
+  brandFont: {
+    fontFamily: "Quicksand-Bold",
+    fontWeight: "normal",
   },
 });

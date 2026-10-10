@@ -1,43 +1,44 @@
-import { useMemo, useState } from "react";
+import { AppText as Text } from "./typography";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { LedgerEntry } from "../../data/models";
-import { useMonthPin } from "../../hooks/use-month-pin";
-import { useLedgerMonth } from "../../hooks/use-ledger-month";
+import type { LedgerEntry } from "../data/models";
+import { useMonthPin } from "../hooks/use-month-pin";
+import { useLedgerMonth } from "../hooks/use-ledger-month";
 import {
   daysInMonth,
   ledgerSummary,
   monthKey,
   moveMonth,
   parseMonth,
-} from "../../utils/ledger";
-import { money } from "../../utils/expenses";
-import { LedgerCalendar } from "../../components/ledger-calendar";
-import { LedgerEntryRow } from "../../components/ledger-entry-row";
-import { LedgerAmountForm } from "../../components/ledger-amount-form";
-import {
-  Button,
-  colors,
-  Empty,
-  FormModal,
-  Header,
-  Screen,
-  s,
-} from "../../components/ui";
+} from "../utils/ledger";
+import { money } from "../utils/expenses";
+import { RegisterButton } from "./list-controls";
+import { ExpenseForm } from "./expense-form";
+import { LedgerCalendar } from "./ledger-calendar";
+import { LedgerEntryRow } from "./ledger-entry-row";
+import { LedgerAmountForm } from "./ledger-amount-form";
+import { Button, colors, Empty, FormModal, Header, Screen, s } from "./ui";
 
-export default function LedgerScreen() {
+export function ExpenseCalendarView({
+  active,
+  viewSwitcher,
+}: {
+  active: boolean;
+  viewSwitcher: ReactNode;
+}) {
   const [month, setMonth] = useState(() => monthKey());
   const [selectedDay, setSelectedDay] = useState(() => new Date().getDate());
+  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const { busy } = useMonthPin();
-  const { entries, loading, error, retry } = useLedgerMonth(month);
+  const { entries, loading, error, retry } = useLedgerMonth(month, active);
   const summary = useMemo(() => ledgerSummary(entries), [entries]);
   const selectedEntries = useMemo(
     () => entries.filter((entry) => entry.day === selectedDay),
@@ -63,8 +64,18 @@ export default function LedgerScreen() {
           ListHeaderComponent={
             <View style={styles.header}>
               <Header
-                title="가계부"
-                description="월별 지출을 확인하고 기록해요"
+                title="고정비"
+                description="매달 반복되는 지출을 관리해요"
+                action={
+                  <View style={styles.headerActions}>
+                    {viewSwitcher}
+                    <RegisterButton
+                      accessibilityLabel="고정비 등록"
+                      disabled={busy}
+                      onPress={() => setAdding(true)}
+                    />
+                  </View>
+                }
               />
               <View style={styles.monthBar}>
                 <Pressable
@@ -179,7 +190,7 @@ export default function LedgerScreen() {
                 description={
                   entries.length
                     ? "캘린더에서 다른 날짜를 선택해 주세요."
-                    : "고정비 메뉴에 항목을 등록하면 매월 가계부에 표시돼요."
+                    : "목록에서 고정비를 등록하면 해당 월부터 표시돼요."
                 }
               />
             ) : null
@@ -187,13 +198,22 @@ export default function LedgerScreen() {
           ListFooterComponent={
             !loading && !error ? (
               <Text style={styles.footer}>
-                고정 금액은 자동 반영돼요. 변동 항목을 눌러 이 달의 실제 금액을
-                입력해 주세요.
+                고정 금액은 자동 반영돼요. 변동 항목은 실제 금액을 입력해
+                주세요. 미입력 금액은 합계에서 제외돼요.
               </Text>
             ) : null
           }
         />
       </Screen>
+      {adding && (
+        <FormModal
+          title="고정비 추가"
+          busy={busy}
+          onClose={() => setAdding(false)}
+        >
+          <ExpenseForm onClose={() => setAdding(false)} />
+        </FormModal>
+      )}
       {editing && (
         <FormModal
           title="변동 금액 입력"
@@ -212,6 +232,7 @@ export default function LedgerScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   page: { gap: 0, paddingTop: 16 },
   header: { gap: 12, marginBottom: 8 },
   monthBar: { flexDirection: "row", alignItems: "center", gap: 2 },

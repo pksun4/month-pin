@@ -8,22 +8,22 @@ export function parseMonth(month: string) {
   return { year, monthIndex: Number(month.slice(5)) - 1 };
 }
 
-export function monthKey(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-export function dateKey(date = new Date()) {
-  return `${monthKey(date)}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-export function isValidDateKey(value: string) {
-  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value))
-    return false;
+export function isValidMonth(value: string) {
   try {
-    return Number(value.slice(8)) <= daysInMonth(value.slice(0, 7));
+    parseMonth(value);
+    return true;
   } catch {
     return false;
   }
+}
+
+export function formatMonth(value: string) {
+  const { year, monthIndex } = parseMonth(value);
+  return `${year}년 ${monthIndex + 1}월`;
+}
+
+export function monthKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export function daysInMonth(month: string) {

@@ -1,11 +1,6 @@
+import { AppText as Text, AppTextInput as TextInput } from "./typography";
 import { useState } from "react";
-import {
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { parseDay } from "../utils/expenses";
 import { colors, s } from "./ui";
 
@@ -31,7 +26,13 @@ export function ChargeDayField({
   return (
     <View style={s.field}>
       <View style={[styles.row, stacked && styles.stacked]}>
-        <Text style={[s.fieldLabel, !stacked && { width: 68 * fontScale }]}>
+        <Text
+          style={[
+            s.fieldLabel,
+            styles.label,
+            !stacked && { width: 68 * fontScale },
+          ]}
+        >
           {label}
         </Text>
         <View style={styles.controls}>
@@ -56,7 +57,7 @@ export function ChargeDayField({
               onChangeText={(text) => onChange(text.replace(/\D/g, ""))}
               placeholder="25"
               placeholderTextColor={colors.muted}
-              style={styles.input}
+              style={[styles.input, { height: 26 * fontScale }]}
               keyboardType="number-pad"
               maxLength={2}
               editable={!disabled}
@@ -71,7 +72,9 @@ export function ChargeDayField({
                 setTouched(true);
               }}
             />
-            <Text style={styles.unit}>일</Text>
+            <View style={[styles.unitSlot, { height: 26 * fontScale }]}>
+              <Text style={styles.unit}>일</Text>
+            </View>
           </View>
           <Text style={styles.hint}>
             {optional ? "1~31일 · 선택" : "매월 · 1~31일"}
@@ -96,17 +99,23 @@ const styles = StyleSheet.create({
     gap: 10,
     flexShrink: 1,
   },
+  label: { lineHeight: 22, includeFontPadding: false },
   input: {
     flex: 1,
     minWidth: 0,
-    minHeight: 26,
     padding: 0,
     color: colors.ink,
     fontSize: 14,
-    lineHeight: 22,
     textAlign: "center",
+    textAlignVertical: "center",
+    includeFontPadding: false,
   },
-  unit: { color: colors.muted, fontSize: 14, lineHeight: 22 },
+  unitSlot: { justifyContent: "center" },
+  unit: {
+    color: colors.muted,
+    fontSize: 14,
+    includeFontPadding: false,
+  },
   hint: { flexShrink: 1, color: colors.muted, fontSize: 12, lineHeight: 18 },
   focused: { borderColor: colors.blue },
   invalid: { borderColor: colors.red },

@@ -1,7 +1,7 @@
 import { Image } from "react-native";
 import { colors } from "./ui";
 
-export function BrandLogo({ size = 30 }: { size?: number }) {
+export function BrandLogo({ size = 26 }: { size?: number }) {
   return (
     <Image
       source={require("../../assets/brand/symbol.png")}
@@ -14,7 +14,6 @@ export function BrandLogo({ size = 30 }: { size?: number }) {
         width: size * (224 / 256),
         height: size,
         flexShrink: 0,
-        transform: [{ translateY: 1 }],
       }}
     />
   );

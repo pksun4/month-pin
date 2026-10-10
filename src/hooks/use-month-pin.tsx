@@ -21,17 +21,21 @@ import type {
 
 interface Store {
   expenses: Expense[];
+  endedExpenses: Expense[];
   methods: PaymentMethod[];
   loading: boolean;
   error: string | null;
   busy: boolean;
+  dataRevision: number;
   refresh: () => Promise<void>;
   saveExpense: (
     input: ExpenseInput,
     id?: number,
-    effectiveDate?: string,
+    effectiveMonth?: string,
+    renewalSourceId?: number,
   ) => Promise<void>;
   saveMethod: (input: MethodInput, id?: number) => Promise<void>;
+  endExpense: (id: number, endMonth: string) => Promise<void>;
   deleteExpense: (id: number) => Promise<void>;
   deleteMethod: (id: number) => Promise<void>;
   reorderMethods: (kind: MethodKind, ids: readonly number[]) => Promise<void>;
@@ -45,10 +49,12 @@ const Context = createContext<Store | null>(null);
 export function MonthPinProvider({ children }: { children: ReactNode }) {
   const db = useSQLiteContext();
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [endedExpenses, setEndedExpenses] = useState<Expense[]>([]);
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dataRevision, setDataRevision] = useState(0);
   const saving = useRef(false);
   const databaseQueue = useRef<Promise<void>>(Promise.resolve());
   const runDatabase = useCallback(
@@ -62,27 +68,32 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
-  const loadLedgerMonth = useCallback(
-    (month: string) =>
-      runDatabase(() => ledgerRepository.loadLedgerMonth(db, month)),
-    [db, runDatabase],
-  );
   const refresh = useCallback(async () => {
     try {
-      const [nextExpenses, nextMethods] = await Promise.all([
+      const [nextExpenses, nextMethods, nextEndedExpenses] = await Promise.all([
         repository.readExpenses(db),
         repository.readMethods(db),
+        repository.readExpenses(db, "ended"),
       ]);
       setExpenses(nextExpenses);
+      setEndedExpenses(nextEndedExpenses);
       setMethods(nextMethods);
       setError(null);
     } catch (cause) {
       setError("저장한 데이터를 불러오지 못했어요. 다시 시도해 주세요.");
       throw cause;
     } finally {
+      // Invalidate monthly snapshots even if reloading the lists after a write failed.
+      setDataRevision((revision) => revision + 1);
       setLoading(false);
     }
   }, [db]);
+
+  const loadLedgerMonth = useCallback(
+    (month: string) =>
+      runDatabase(() => ledgerRepository.loadLedgerMonth(db, month)),
+    [db, runDatabase],
+  );
 
   useEffect(() => {
     void Promise.resolve()
@@ -110,15 +121,27 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     <Context.Provider
       value={{
         expenses,
+        endedExpenses,
         methods,
         loading,
         error,
         busy,
+        dataRevision,
         refresh,
-        saveExpense: (input, id, effectiveDate) =>
-          mutate(() => repository.saveExpense(db, input, id, effectiveDate)),
+        saveExpense: (input, id, effectiveMonth, renewalSourceId) =>
+          mutate(() =>
+            repository.saveExpense(
+              db,
+              input,
+              id,
+              effectiveMonth,
+              renewalSourceId,
+            ),
+          ),
         saveMethod: (input, id) =>
           mutate(() => repository.saveMethod(db, input, id)),
+        endExpense: (id, endMonth) =>
+          mutate(() => repository.endExpense(db, id, endMonth)),
         deleteExpense: (id) => mutate(() => repository.deleteExpense(db, id)),
         deleteMethod: (id) => mutate(() => repository.deleteMethod(db, id)),
         reorderMethods: (kind, ids) =>

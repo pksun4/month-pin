@@ -1,5 +1,6 @@
+import { AppText as Text } from "./typography";
 import { useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { router } from "expo-router";
 import type { Expense } from "../data/models";
 import {
@@ -16,40 +17,52 @@ import {
   paymentMethodsByKind,
 } from "../utils/expenses";
 import { Button, Field, s } from "./ui";
-import { EffectiveDateField } from "./effective-date-field";
+import { MonthField } from "./month-field";
 import { FormSegments } from "./form-segments";
 import { FormSelect } from "./form-select";
 import { ChargeDayField } from "./charge-day-field";
 import { ProviderIcon } from "./provider-icon";
 import { METHOD_KINDS } from "../data/method-types";
-import { dateKey, isValidDateKey } from "../utils/ledger";
+import { monthKey, isValidMonth, moveMonth } from "../utils/ledger";
 
 export function ExpenseForm({
   expense,
+  renewal,
   onClose,
   initialCategoryCode,
 }: {
   expense?: Expense;
+  renewal?: Expense;
   onClose: () => void;
   initialCategoryCode?: ExpenseCategoryCode;
 }) {
+  const initial = expense ?? renewal;
   const { methods, saveExpense, busy } = useMonthPin();
-  const [name, setName] = useState(expense?.name ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
   const [categoryCode, setCategoryCode] = useState<ExpenseCategoryCode | null>(
-    expense ? expense.categoryCode : (initialCategoryCode ?? null),
+    initial ? initial.categoryCode : (initialCategoryCode ?? null),
   );
   const [amountTypeCode, setAmountTypeCode] = useState<ExpenseAmountTypeCode>(
-    expense?.amountTypeCode ?? "fixed",
+    initial?.amountTypeCode ?? "fixed",
   );
   const [amount, setAmount] = useState(
-    expense?.amount != null ? formatAmountInput(String(expense.amount)) : "",
+    initial?.amount != null ? formatAmountInput(String(initial.amount)) : "",
   );
-  const [day, setDay] = useState(expense ? String(expense.chargeDay) : "");
+  const [day, setDay] = useState(initial ? String(initial.chargeDay) : "");
   const [methodId, setMethodId] = useState<number | null>(
-    expense?.methodId ?? null,
+    initial?.methodId ?? null,
   );
   const [error, setError] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState(() => dateKey());
+  const [effectiveMonth, setEffectiveMonth] = useState(() => monthKey());
+  const [startMonth, setStartMonth] = useState(
+    () =>
+      expense?.startMonth ??
+      (renewal?.endMonth &&
+      renewal.endMonth >= monthKey() &&
+      renewal.endMonth !== "9999-12"
+        ? moveMonth(renewal.endMonth, 1)
+        : monthKey()),
+  );
   const amountChanged =
     !!expense &&
     (amountTypeCode !== expense.amountTypeCode ||
@@ -95,9 +108,17 @@ export function ExpenseForm({
     }
     if (
       amountChanged &&
-      (!isValidDateKey(effectiveDate) || effectiveDate < dateKey())
+      (!isValidMonth(effectiveMonth) || effectiveMonth < monthKey())
     ) {
-      setError("변경 적용일은 오늘 이후로 선택해 주세요.");
+      setError("변경 적용 월은 이번 달 이후로 선택해 주세요.");
+      return;
+    }
+    if (!isValidMonth(startMonth)) {
+      setError("시작 월을 다시 확인해 주세요.");
+      return;
+    }
+    if (renewal?.endMonth && startMonth <= renewal.endMonth) {
+      setError("새 시작 월은 이전 마지막 반영 월보다 이후로 선택해 주세요.");
       return;
     }
     submitting.current = true;
@@ -111,9 +132,11 @@ export function ExpenseForm({
           amount: parsedAmount,
           chargeDay: parsedDay,
           methodId,
+          startMonth,
         },
         expense?.id,
-        amountChanged ? effectiveDate : undefined,
+        amountChanged ? effectiveMonth : undefined,
+        renewal?.id,
       );
       onClose();
     } catch (cause) {
@@ -129,6 +152,12 @@ export function ExpenseForm({
 
   return (
     <>
+      {renewal && (
+        <Text style={s.caption}>
+          이전 항목의 정보를 가져왔어요. 새 기간으로 등록하며 기존 기록은
+          유지해요.
+        </Text>
+      )}
       <Field
         label="고정비 이름"
         value={name}
@@ -175,10 +204,32 @@ export function ExpenseForm({
           등록해요.
         </Text>
       )}
+      <MonthField
+        label="시작 월"
+        minimumMonth={
+          renewal?.endMonth && renewal.endMonth !== "9999-12"
+            ? moveMonth(renewal.endMonth, 1)
+            : undefined
+        }
+        value={startMonth}
+        displayValue={
+          expense && startMonth === "1000-01" ? "기존 전체 기간" : undefined
+        }
+        onChange={setStartMonth}
+        disabled={busy}
+        hint={
+          expense
+            ? "시작 월 이전의 자동 내역은 정리하고, 직접 입력한 실제 금액은 유지해요."
+            : "선택한 월부터 결제일에 표시해요. 이번 달 결제일이 지났어도 반영돼요."
+        }
+      />
       {amountChanged && (
-        <EffectiveDateField
-          value={effectiveDate}
-          onChange={setEffectiveDate}
+        <MonthField
+          label="변경 적용 월"
+          minimumMonth={monthKey()}
+          hint="선택한 월부터 새 금액을 반영해요. 이전 달과 직접 입력한 실제 금액은 유지돼요."
+          value={effectiveMonth}
+          onChange={setEffectiveMonth}
           disabled={busy}
         />
       )}

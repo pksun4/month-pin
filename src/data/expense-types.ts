@@ -36,3 +36,15 @@ export type ExpenseSortCode = (typeof EXPENSE_SORT_OPTIONS)[number]["code"];
 export function getExpenseAmountType(code: string) {
   return EXPENSE_AMOUNT_TYPES.find((type) => type.code === code);
 }
+
+export const EXPENSE_VIEW_OPTIONS = [
+  { code: "list", label: "목록", icon: "list-outline" },
+  { code: "calendar", label: "캘린더", icon: "calendar-outline" },
+] as const;
+export type ExpenseViewCode = (typeof EXPENSE_VIEW_OPTIONS)[number]["code"];
+
+export const EXPENSE_STATUS_OPTIONS = [
+  { code: "active", label: "진행 중" },
+  { code: "ended", label: "종료" },
+] as const;
+export type ExpenseStatusCode = (typeof EXPENSE_STATUS_OPTIONS)[number]["code"];

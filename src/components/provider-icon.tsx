@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Text, View } from "react-native";
+import { AppText as Text } from "./typography";
+import { Image, StyleSheet, View } from "react-native";
 import { getProvider } from "../data/providers";
 import { PROVIDER_LOGOS } from "../data/provider-logos";
 import { colors } from "./ui";

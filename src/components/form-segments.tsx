@@ -1,10 +1,5 @@
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { AppText as Text } from "./typography";
+import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { colors, s } from "./ui";
 
 export function FormSegments<Code extends string>({

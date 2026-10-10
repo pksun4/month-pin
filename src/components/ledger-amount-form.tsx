@@ -1,5 +1,6 @@
+import { AppText as Text } from "./typography";
 import { useState } from "react";
-import { Text } from "react-native";
+
 import type { LedgerEntry } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { formatAmountInput } from "../utils/expenses";
