@@ -39,6 +39,12 @@ exports.hookRuntime = function hookRuntime(path, mocks) {
         slots[index] = { value: callback, deps };
       return slots[index].value;
     },
+    useMemo(factory, deps) {
+      const index = cursor++;
+      if (changed(slots[index]?.deps, deps))
+        slots[index] = { value: factory(), deps };
+      return slots[index].value;
+    },
     useRef(initial) {
       const index = cursor++;
       if (!slots[index]) slots[index] = { value: { current: initial } };

@@ -36,8 +36,98 @@ const repository = loadTypeScript("src/data/database.ts");
 const domain = loadTypeScript("src/utils/expenses.ts");
 const ledgerRepository = loadTypeScript("src/data/ledger.ts");
 const ledgerDomain = loadTypeScript("src/utils/ledger.ts");
+const cardBenefitRepository = loadTypeScript("src/data/card-benefits.ts");
+const cardBenefitDomain = loadTypeScript("src/utils/card-benefits.ts");
+const cardBenefitHistory = loadTypeScript("src/data/card-benefit-history.ts");
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+function methodFormFixture({
+  method,
+  methods = [],
+  initialKind = "card",
+  saveMethod,
+  onClose = () => {},
+}) {
+  const revealed = [];
+  const focused = [];
+  const runtime = hookRuntime("src/components/method-form.tsx", {
+    "react-native": {
+      View: "View",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "./typography": { AppText: "Text" },
+    "../data/providers": loadTypeScript("src/data/providers.ts"),
+    "../data/method-types": loadTypeScript("src/data/method-types.ts"),
+    "../utils/expenses": domain,
+    "../utils/method-form": loadTypeScript("src/utils/method-form.ts"),
+    "../hooks/use-month-pin": {
+      useMonthPin: () => ({
+        methods,
+        busy: false,
+        saveMethod,
+      }),
+    },
+    "./ui": {
+      Button: "Button",
+      Field: "Field",
+      FieldMessage: "FieldMessage",
+      s: {},
+      useFormNavigation: () => (node, focus) => {
+        revealed.push(node?.field);
+        focus?.();
+      },
+    },
+    "./provider-select": { ProviderSelect: "ProviderSelect" },
+    "./form-segments": { FormSegments: "FormSegments" },
+    "./form-select": { FormSelect: "FormSelect" },
+    "./charge-day-field": { ChargeDayField: "ChargeDayField" },
+    "./provider-icon": { ProviderIcon: "ProviderIcon" },
+    "./month-field": { MonthField: "MonthField" },
+    "../utils/ledger": ledgerDomain,
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = () => {
+    const nodes = flatten(
+      runtime.render(({ MethodForm }) =>
+        MethodForm({
+          method,
+          initialKind,
+          onClose,
+        }),
+      ),
+    );
+    for (const node of nodes) {
+      if (node.props?.testID?.startsWith("method-field-")) {
+        const field = node.props.testID.replace("method-field-", "");
+        node.props.ref.current = { field };
+        for (const child of flatten(node.props.children))
+          if (child.props?.controlRef)
+            child.props.controlRef.current = {
+              focus: () => focused.push(field),
+            };
+      }
+    }
+    return nodes;
+  };
+  const control = (label) => {
+    const node = render().find((element) => element.props?.label === label);
+    assert.ok(node, `Missing control: ${label}`);
+    return node.props;
+  };
+  return {
+    render,
+    control,
+    revealed,
+    focused,
+    component: (type) => render().find((node) => node.type === type)?.props,
+  };
+}
 
 function ledgerHookFixture() {
   const requests = [];
@@ -158,6 +248,17 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
       },
     },
     "../data/ledger": { loadLedgerMonth: async () => [] },
+    "../data/card-benefits": {
+      loadCardBenefitMonth: async (db, month) => ({
+        month,
+        confirmed: false,
+        cards: [],
+      }),
+      saveCardBenefitMonth: async () => {
+        if (failWrite) throw new Error("Write failed");
+        writes++;
+      },
+    },
   });
   const render = () =>
     runtime.render(({ MonthPinProvider }) =>
@@ -179,6 +280,15 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
   await assert.rejects(render().saveExpense(insuranceInput), /Write failed/);
   assert.equal(render().dataRevision, initialRevision + 2);
   assert.equal(render().busy, false);
+  failWrite = false;
+  const revisionBeforeBenefits = render().dataRevision;
+  await render().saveCardBenefitMonth("2026-10", [{ methodId: 1, amount: 0 }]);
+  assert.equal(render().dataRevision, revisionBeforeBenefits + 1);
+  assert.deepEqual(await render().loadCardBenefitMonth("2026-10"), {
+    month: "2026-10",
+    confirmed: false,
+    cards: [],
+  });
 });
 
 function sqliteAdapter(path = ":memory:") {
@@ -186,7 +296,10 @@ function sqliteAdapter(path = ":memory:") {
   return {
     sqlite,
     execAsync: async (sql) => sqlite.exec(sql),
-    runAsync: async (sql, ...params) => sqlite.prepare(sql).run(...params),
+    runAsync: async (sql, ...params) => {
+      const result = sqlite.prepare(sql).run(...params);
+      return { ...result, lastInsertRowId: result.lastInsertRowid };
+    },
     getFirstAsync: async (sql, ...params) => sqlite.prepare(sql).get(...params),
     getAllAsync: async (sql, ...params) => sqlite.prepare(sql).all(...params),
     withTransactionAsync: async (action) => {
@@ -216,7 +329,8 @@ function withFixedType(rows) {
 async function readPreCardTypeMethods(db) {
   return db.getAllAsync(`SELECT m.id, m.kind, m.providerCode,
     COALESCE(p.name, m.legacyProvider) AS provider,
-    m.name, m.bankId, m.settlementDay, NULL AS cardTypeCode, m.sortOrder
+    m.name, m.bankId, m.settlementDay, NULL AS cardTypeCode, m.sortOrder,
+    NULL AS benefitTypeCode, NULL AS benefitAmount
     FROM payment_methods m
     LEFT JOIN payment_providers p ON p.code = m.providerCode AND p.kind = m.kind
     ORDER BY m.sortOrder, m.id DESC`);
@@ -230,6 +344,8 @@ const bankInput = {
   settlementDay: null,
   cardTypeCode: null,
 };
+
+const cardBenefitDefaults = { benefitTypeCode: "fixed", benefitAmount: 0 };
 
 const insuranceInput = {
   startMonth: "1000-01",
@@ -742,7 +858,7 @@ test("v8 upgrade preserves every monthly record, marks actual zero and retries a
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(
       await ledgerRepository.readLedgerMonth(db, ledgerDomain.monthKey()),
@@ -823,6 +939,7 @@ test("monthly ledger snapshots are idempotent and actual amounts survive reconne
     await repository.saveMethod(db, bankInput);
     const bank = (await repository.readMethods(db))[0];
     await repository.saveMethod(db, {
+      ...cardBenefitDefaults,
       kind: "card",
       providerCode: "card_kb",
       name: "생활 카드",
@@ -922,11 +1039,14 @@ test("template edits and deletions preserve monthly names, amounts and payment s
   const futureMonth = ledgerDomain.moveMonth(ledgerDomain.monthKey(), 1);
   try {
     await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bankId = (await repository.readMethods(db))[0].id;
     await repository.saveMethod(db, {
+      ...cardBenefitDefaults,
       kind: "card",
       providerCode: "card_kb",
       name: "처음 카드",
-      bankId: null,
+      bankId,
       settlementDay: 10,
       cardTypeCode: "credit",
     });
@@ -956,10 +1076,11 @@ test("template edits and deletions preserve monthly names, amounts and payment s
     await repository.saveMethod(
       db,
       {
+        ...cardBenefitDefaults,
         kind: "card",
         providerCode: "card_shinhan",
         name: "변경 카드",
-        bankId: null,
+        bankId,
         settlementDay: null,
         cardTypeCode: "debit",
       },
@@ -1110,7 +1231,7 @@ test("v7 ledger migration rolls back failures and preserves existing records and
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(await repository.readExpenses(db), expenses);
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -1209,6 +1330,404 @@ test("registration and custom method sorting remain independent with duplicate n
   );
   for (const order of ["provider", "registered", "amount", "custom"])
     assert.deepEqual(domain.sortPaymentMethods([], order, [], []), []);
+});
+
+test("card sections contain only credit and debit while preserving every inner sort", () => {
+  const methods = [
+    {
+      id: 4,
+      kind: "card",
+      cardTypeCode: "credit",
+      providerCode: "card_samsung",
+      name: "나",
+      sortOrder: 2,
+    },
+    {
+      id: 2,
+      kind: "card",
+      cardTypeCode: "debit",
+      providerCode: "card_samsung",
+      name: "나",
+      sortOrder: 0,
+    },
+    {
+      id: 3,
+      kind: "card",
+      cardTypeCode: null,
+      providerCode: "card_kb",
+      name: "기존 카드",
+      sortOrder: 1,
+    },
+    {
+      id: 5,
+      kind: "card",
+      cardTypeCode: "debit",
+      providerCode: "card_kb",
+      name: "가",
+      sortOrder: 3,
+    },
+    {
+      id: 1,
+      kind: "card",
+      cardTypeCode: "credit",
+      providerCode: "card_kb",
+      name: "가",
+      sortOrder: 4,
+    },
+    {
+      id: 6,
+      kind: "bank",
+      cardTypeCode: null,
+      providerCode: "bank_kb",
+      name: "통장",
+      sortOrder: 0,
+    },
+  ];
+  const expenses = [
+    { methodId: 4, amount: 10000 },
+    { methodId: 1, amount: 5000 },
+    { methodId: 2, amount: 2000 },
+  ];
+  const original = structuredClone(methods);
+  const expected = {
+    provider: [
+      [1, 4],
+      [5, 2],
+    ],
+    registered: [
+      [1, 4],
+      [2, 5],
+    ],
+    amount: [
+      [4, 1],
+      [2, 5],
+    ],
+    custom: [
+      [4, 1],
+      [2, 5],
+    ],
+  };
+  for (const [order, ids] of Object.entries(expected)) {
+    const sections = domain.groupCardMethods(
+      domain.sortPaymentMethods(methods, order, methods, expenses),
+    );
+    assert.deepEqual(
+      sections.map((section) => section.key),
+      ["credit", "debit"],
+    );
+    assert.deepEqual(
+      sections.map((section) => section.data.map((method) => method.id)),
+      ids,
+    );
+  }
+  assert.deepEqual(methods, original);
+  assert.deepEqual(domain.groupCardMethods([]), []);
+  assert.deepEqual(domain.groupCardMethods([methods[5]]), []);
+  assert.deepEqual(
+    domain.groupCardMethods([methods[1]]).map((section) => section.key),
+    ["debit"],
+  );
+  const changed = methods.map((method) =>
+    method.id === 4 ? { ...method, cardTypeCode: "debit" } : method,
+  );
+  assert.deepEqual(
+    domain
+      .groupCardMethods(changed)
+      .map((section) => section.data.map((method) => method.id)),
+    [[1], [4, 2, 5]],
+  );
+});
+
+test("sectioned browsing leaves swipes to the outer container and enables local drag only while reordering", () => {
+  const runtime = hookRuntime("src/components/reorderable-list.tsx", {
+    "react-native": { FlatList: "FlatList", View: "View" },
+    "react-native-draggable-flatlist": {
+      default: "DraggableFlatList",
+      ScaleDecorator: "ScaleDecorator",
+      NestableDraggableFlatList: "NestedList",
+      NestableScrollContainer: "ScrollContainer",
+    },
+  });
+  const sections = [
+    { key: "credit", title: "신용카드", data: [{ id: 1 }, { id: 2 }] },
+    { key: "debit", title: "체크카드", data: [{ id: 3 }, { id: 4 }] },
+    { key: "unspecified", title: "종류 미지정", data: [{ id: 5 }] },
+  ];
+  let start;
+  let end;
+  let itemIndex;
+  const browseItems = [];
+  const render = (reordering) => {
+    const element = runtime.render(({ ReorderableList }) =>
+      ReorderableList({
+        sections,
+        reordering,
+        data: sections.flatMap((section) => section.data),
+        keyExtractor: (item) => String(item.id),
+        ItemSeparatorComponent: "Separator",
+        onDragBegin: (index) => (start = index),
+        onDragEnd: (result) => (end = result),
+        renderItem: (params) => {
+          itemIndex = params.getIndex();
+          if (!reordering) browseItems.push(params);
+          return null;
+        },
+      }),
+    );
+    return element.type(element.props);
+  };
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const browse = render(false);
+  assert.equal(browse.type, "ScrollContainer");
+  assert.equal(
+    flatten(browse).some((node) => node.type === "NestedList"),
+    false,
+  );
+  assert.deepEqual(
+    browseItems.map((item) => item.item.id),
+    [1, 2, 3, 4, 5],
+  );
+  assert.deepEqual(
+    browseItems.map((item) => item.getIndex()),
+    [0, 1, 2, 3, 4],
+  );
+  assert.ok(browseItems.every((item) => item.isActive === false));
+  browseItems[0].drag();
+  assert.equal(start, undefined);
+  assert.equal(
+    flatten(browse).filter((node) => node.type === "Separator").length,
+    2,
+  );
+  const editing = render(true);
+  assert.equal(browse.type, editing.type);
+  const lists = flatten(editing).filter((node) => node.type === "NestedList");
+  assert.equal(lists.length, 3);
+  const debitList = lists[1].props;
+  assert.equal(debitList.dragItemOverflow, false);
+  debitList.onDragBegin(1);
+  assert.equal(start, 3);
+  debitList.renderItem({
+    item: sections[1].data[1],
+    getIndex: () => 1,
+    isActive: false,
+    drag: () => {},
+  });
+  assert.equal(itemIndex, 3);
+  debitList.renderItem({
+    item: sections[1].data[1],
+    getIndex: () => undefined,
+    isActive: false,
+    drag: () => {},
+  });
+  assert.equal(itemIndex, undefined);
+  debitList.onDragEnd({
+    data: [sections[1].data[1], sections[1].data[0]],
+    from: 1,
+    to: 0,
+  });
+  assert.equal(end.from, 3);
+  assert.equal(end.to, 2);
+  assert.deepEqual(
+    end.data.map((item) => item.id),
+    [1, 2, 4, 3, 5],
+  );
+  assert.deepEqual(
+    sections.flatMap((section) => section.data.map((item) => item.id)),
+    [1, 2, 3, 4, 5],
+  );
+  const returned = render(false);
+  assert.equal(returned.type, browse.type);
+  assert.equal(
+    flatten(returned).some((node) => node.type === "NestedList"),
+    false,
+  );
+});
+
+test("wallet card reorder blocks section crossings, saves all cards and restores the prior order on failure", async () => {
+  const bank = {
+    id: 6,
+    kind: "bank",
+    cardTypeCode: null,
+    providerCode: "bank_kb",
+    name: "통장",
+    sortOrder: 0,
+  };
+  const store = {
+    methods: [
+      bank,
+      {
+        id: 1,
+        kind: "card",
+        cardTypeCode: "credit",
+        providerCode: "card_kb",
+        name: "가",
+        sortOrder: 0,
+      },
+      {
+        id: 2,
+        kind: "card",
+        cardTypeCode: "credit",
+        providerCode: "card_kb",
+        name: "나",
+        sortOrder: 2,
+      },
+      {
+        id: 3,
+        kind: "card",
+        cardTypeCode: "debit",
+        providerCode: "card_samsung",
+        name: "가",
+        sortOrder: 1,
+      },
+      {
+        id: 4,
+        kind: "card",
+        cardTypeCode: "debit",
+        providerCode: "card_samsung",
+        name: "나",
+        sortOrder: 3,
+      },
+      {
+        id: 5,
+        kind: "card",
+        cardTypeCode: null,
+        providerCode: "card_kb",
+        name: "기존",
+        sortOrder: 4,
+      },
+    ],
+    expenses: [],
+    busy: false,
+  };
+  const calls = [];
+  const alerts = [];
+  let fail = true;
+  store.reorderMethods = async (kind, ids) => {
+    calls.push({ kind, ids });
+    if (fail) throw new Error("Simulated order failure");
+    store.methods = store.methods.map((method) =>
+      method.kind === kind
+        ? { ...method, sortOrder: ids.indexOf(method.id) }
+        : method,
+    );
+  };
+  const mocks = {
+    "react-native": {
+      View: "View",
+      Alert: { alert: (...args) => alerts.push(args) },
+    },
+    "../../data/method-types": loadTypeScript("src/data/method-types.ts"),
+    "../../hooks/use-month-pin": { useMonthPin: () => store },
+    "../../utils/expenses": domain,
+    "../../components/ui": Object.fromEntries(
+      ["Button", "Empty", "FormModal", "Header", "Screen"]
+        .map((name) => [name, name])
+        .concat([["s", {}]]),
+    ),
+    "../../components/list-controls": Object.fromEntries(
+      [
+        "ListTabs",
+        "ListSummary",
+        "ListToolbar",
+        "ListReorderButton",
+        "RegisterButton",
+      ]
+        .map((name) => [name, name])
+        .concat([["listStyles", {}]]),
+    ),
+  };
+  for (const [file, name] of [
+    ["typography", "AppText"],
+    ["reorderable-list", "ReorderableList"],
+    ["expense-row", "ExpenseRow"],
+    ["method-form", "MethodForm"],
+    ["provider-icon", "ProviderIcon"],
+    ["payment-method-row", "PaymentMethodRow"],
+    ["select-popover", "SelectPopover"],
+  ])
+    mocks[`../../components/${file}`] = { [name]: name };
+  const runtime = hookRuntime("src/app/(tabs)/wallet.tsx", mocks);
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const list = () =>
+    flatten(runtime.render((module) => module.default())).find(
+      (node) => node.type === "ReorderableList",
+    ).props;
+  const header = () => flatten(list().ListHeaderComponent);
+  header()
+    .find((node) => node.type === "ListTabs")
+    .props.onChange("card");
+  assert.deepEqual(
+    list().sections.map((section) => section.key),
+    ["credit", "debit"],
+  );
+  header()
+    .find((node) => node.type === "ListReorderButton")
+    .props.onPress();
+  const row = (id) => {
+    const props = list();
+    const index = props.data.findIndex((method) => method.id === id);
+    return props.renderItem({
+      item: props.data[index],
+      getIndex: () => index,
+      isActive: false,
+      drag: () => {},
+    }).props;
+  };
+  assert.equal(row(2).reorder.canMoveDown, false);
+  assert.equal(row(3).reorder.canMoveUp, false);
+  row(2).reorder.onAccessibilityMove(1);
+  assert.equal(calls.length, 0);
+  const move = row(2).reorder.onAccessibilityMove;
+  move(-1);
+  move(-1);
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(alerts.length, 1);
+  assert.deepEqual(
+    list().data.map((method) => method.id),
+    [1, 2, 3, 4],
+  );
+  fail = false;
+  row(2).reorder.onAccessibilityMove(-1);
+  await settle();
+  assert.deepEqual(calls[1], {
+    kind: "card",
+    ids: [2, 1, 3, 4, 5],
+  });
+  assert.deepEqual(
+    list().data.map((method) => method.id),
+    [2, 1, 3, 4],
+  );
+  assert.deepEqual(
+    store.methods.find((method) => method.id === bank.id),
+    bank,
+  );
+  header()
+    .find((node) => node.type === "ListReorderButton")
+    .props.onPress();
+  header()
+    .find((node) => node.props?.label === "카드 정보 확인")
+    .props.onPress();
+  assert.ok(
+    flatten(runtime.render((module) => module.default())).some(
+      (node) => node.props?.label === "수정",
+    ),
+  );
+  header()
+    .find((node) => node.type === "ListTabs")
+    .props.onChange("bank");
+  assert.equal(list().sections, undefined);
+  assert.deepEqual(list().data, [bank]);
 });
 
 test("method fixed-expense sorting includes linked cards and handles zero totals and ties", () => {
@@ -1416,6 +1935,7 @@ test("CRUD keeps bank/card links and counts each expense once in the total", asy
     await repository.saveMethod(db, bankInput);
     const bank = (await repository.readMethods(db))[0];
     await repository.saveMethod(db, {
+      ...cardBenefitDefaults,
       kind: "card",
       cardTypeCode: "credit",
       providerCode: "card_samsung",
@@ -1518,6 +2038,7 @@ test("data persists after reopening and repeated initialization", async () => {
     );
     await assert.rejects(
       repository.saveMethod(db, {
+        ...cardBenefitDefaults,
         kind: "card",
         cardTypeCode: "credit",
         providerCode: "card_samsung",
@@ -1604,7 +2125,7 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
 
     db.sqlite.close();
@@ -1694,7 +2215,7 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -1755,6 +2276,7 @@ test("only supported codes of the matching kind are saved; display names are cen
       repository.saveMethod(
         db,
         {
+          ...cardBenefitDefaults,
           ...bankInput,
           kind: "card",
           cardTypeCode: "credit",
@@ -1803,6 +2325,7 @@ test("method order persists independently by kind; edits and additions preserve 
     const [a, b, c] = await idsOf("bank");
     for (const name of ["X", "Y"])
       await repository.saveMethod(db, {
+        ...cardBenefitDefaults,
         kind: "card",
         cardTypeCode: "credit",
         providerCode: "card_samsung",
@@ -1867,12 +2390,13 @@ test("invalid order and failed writes leave the whole previous order intact", as
     const banks = await repository.readMethods(db);
     const ids = banks.map((m) => m.id);
     await repository.saveMethod(db, {
+      ...cardBenefitDefaults,
       kind: "card",
       cardTypeCode: "credit",
       providerCode: "card_samsung",
       name: "X",
-      bankId: null,
-      settlementDay: null,
+      bankId: banks[0].id,
+      settlementDay: 25,
     });
     const card = (await repository.readMethods(db)).find(
       (m) => m.kind === "card",
@@ -1978,6 +2502,7 @@ test("card types persist and credit/debit conversion preserves links, totals and
     await repository.saveMethod(db, bankInput);
     const bank = (await repository.readMethods(db))[0];
     const creditInput = {
+      ...cardBenefitDefaults,
       kind: "card",
       providerCode: "card_samsung",
       cardTypeCode: "credit",
@@ -2065,6 +2590,7 @@ test("card type codes and incompatible settlement dates are validated in reposit
     await repository.saveMethod(db, bankInput);
     const before = await repository.readMethods(db);
     const cardInput = {
+      ...cardBenefitDefaults,
       kind: "card",
       providerCode: "card_samsung",
       name: "카드",
@@ -2182,7 +2708,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -2193,6 +2719,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
       repository.saveMethod(
         db,
         {
+          ...cardBenefitDefaults,
           kind: "card",
           providerCode: "card_samsung",
           name: "수정",
@@ -2354,7 +2881,7 @@ test("v4 order upgrade preserves types, amounts and links; partial migration rol
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     const expenses = await repository.readExpenses(db);
     assert.deepEqual(
@@ -2541,7 +3068,7 @@ test("v5 category migration preserves IDs, amounts, links, custom order and dele
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -2716,7 +3243,7 @@ test("v3 amount type migration preserves data, links and deleted IDs; a failure 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -3012,7 +3539,7 @@ test("v10 migration converts date settings to monthly latest values atomically w
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.equal((await repository.readExpenses(db))[0].startMonth, "1000-01");
     assert.deepEqual(
@@ -3519,7 +4046,7 @@ test("v11 migration preserves retired card totals and calendar history, rolls ba
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      12,
+      15,
     );
     assert.deepEqual(await repository.readExpenses(db, "ended"), ended);
     assert.deepEqual(
@@ -3536,6 +4063,1942 @@ test("v11 migration preserves retired card totals and calendar history, rolls ba
       retained,
     );
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("card benefit form preserves edits on failure, prevents duplicate saves and requires a zero instead of blank benefits", async () => {
+  const calls = [];
+  let fail = true;
+  let closed = 0;
+  const card = {
+    id: 9,
+    kind: "card",
+    providerCode: "card_samsung",
+    name: "혜택 카드",
+    bankId: 1,
+    settlementDay: 25,
+    cardTypeCode: "credit",
+    benefitTypeCode: "fixed",
+    benefitAmount: 10000,
+  };
+  const { render, control } = methodFormFixture({
+    method: card,
+    methods: [{ ...bankInput, id: 1, provider: "KB국민은행" }],
+    saveMethod: async (input, id) => {
+      calls.push({ input, id });
+      if (fail) throw new Error("Simulated save failure");
+    },
+    onClose: () => closed++,
+  });
+  assert.equal(control("월 고정 혜택 (원)").value, "10,000");
+  control("월 혜택").onChange("variable");
+  assert.equal(control("월 변동 혜택 예상액 (원)").value, "10,000");
+  control("월 변동 혜택 예상액 (원)").onChangeText("0");
+  const save = control("저장").onPress;
+  save();
+  save();
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(closed, 0);
+  assert.equal(control("월 변동 혜택 예상액 (원)").value, "0");
+  assert.ok(render().some((node) => node.props?.error));
+  fail = false;
+  control("저장").onPress();
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(closed, 1);
+  assert.equal(calls[1].id, card.id);
+  assert.equal(calls[1].input.benefitTypeCode, "variable");
+  assert.equal(calls[1].input.benefitAmount, 0);
+  control("월 변동 혜택 예상액 (원)").onChangeText("");
+  control("저장").onPress();
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(closed, 1);
+  assert.ok(render().some((node) => node.props?.error));
+  control("월 변동 혜택 예상액 (원)").onChangeText("1000000000");
+  assert.equal(control("저장").disabled, false);
+  assert.ok(control("월 변동 혜택 예상액 (원)").error);
+});
+
+test("card registration requires every applicable field and hides the credit-only date for debit cards", async () => {
+  const calls = [];
+  const bank = { ...bankInput, id: 1, provider: "KB국민은행" };
+  const { render, control, component } = methodFormFixture({
+    methods: [bank],
+    saveMethod: async (input) => calls.push(input),
+  });
+  const blocked = async (message) => {
+    control("저장").onPress();
+    await settle();
+    assert.equal(calls.length, 0);
+    assert.ok(render().some((node) => node.props?.error?.includes(message)));
+  };
+  assert.equal(control("카드 종류").value, null);
+  assert.equal(control("월 혜택").value, null);
+  await blocked("카드사");
+  component("ProviderSelect").onChange("card_samsung");
+  await blocked("카드 이름");
+  control("카드 이름").onChangeText("신규 카드");
+  await blocked("카드 종류");
+  control("카드 종류").onChange("credit");
+  await blocked("통장");
+  assert.deepEqual(
+    control("출금 통장").options.map((option) => option.code),
+    [1],
+  );
+  control("출금 통장").onChange(1);
+  await blocked("출금일");
+  control("출금일").onChange("31");
+  await blocked("고정·변동");
+  control("월 혜택").onChange("fixed");
+  await blocked("혜택 금액");
+  control("월 고정 혜택 (원)").onChangeText("0");
+  control("저장").onPress();
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].cardTypeCode, "credit");
+  assert.equal(calls[0].bankId, 1);
+  assert.equal(calls[0].settlementDay, 31);
+  assert.equal(calls[0].benefitTypeCode, "fixed");
+  assert.equal(calls[0].benefitAmount, 0);
+  control("카드 종류").onChange("debit");
+  assert.equal(
+    render().find((node) => node.props?.label === "출금일"),
+    undefined,
+  );
+  control("월 혜택").onChange("variable");
+  control("월 변동 혜택 예상액 (원)").onChangeText("10000");
+  control("저장").onPress();
+  await settle();
+  assert.equal(calls[1].cardTypeCode, "debit");
+  assert.equal(calls[1].settlementDay, null);
+  assert.equal(calls[1].benefitTypeCode, "variable");
+  assert.equal(calls[1].benefitAmount, 10000);
+
+  const noBank = methodFormFixture({
+    method: { ...calls[0], id: 9, bankId: null },
+    saveMethod: async () => assert.fail("A card without a bank must not save"),
+  });
+  assert.equal(noBank.control("출금 통장").disabled, true);
+  assert.deepEqual(noBank.control("출금 통장").options, []);
+  noBank.control("저장").onPress();
+  await settle();
+  assert.ok(
+    noBank
+      .render()
+      .some((node) => node.props?.error?.includes("통장을 먼저 등록")),
+  );
+});
+
+test("card saves reject missing required fields on insert and update while incomplete legacy records remain recoverable", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    const valid = {
+      ...cardBenefitDefaults,
+      kind: "card",
+      cardTypeCode: "credit",
+      providerCode: "card_samsung",
+      name: "카드",
+      bankId: bank.id,
+      settlementDay: 25,
+    };
+    await repository.saveMethod(db, valid);
+    const card = (await repository.readMethods(db)).find(
+      (method) => method.kind === "card",
+    );
+    const before = await repository.readMethods(db);
+    for (const [patch, message] of [
+      [{ providerCode: null }, /목록에서/],
+      [{ name: "   " }, /카드 이름/],
+      [{ cardTypeCode: null }, /신용카드 또는 체크카드/],
+      [{ bankId: null }, /통장/],
+      [{ bankId: undefined }, /통장/],
+      [{ bankId: card.id }, /통장/],
+      [{ settlementDay: null }, /출금일/],
+      [{ settlementDay: 0 }, /출금일/],
+      [{ settlementDay: 32 }, /출금일/],
+      [{ benefitTypeCode: null }, /월 혜택/],
+      [{ benefitAmount: null }, /월 혜택/],
+      [{ benefitTypeCode: undefined, benefitAmount: undefined }, /월 혜택/],
+    ]) {
+      for (const id of [undefined, card.id])
+        await assert.rejects(
+          repository.saveMethod(db, { ...valid, ...patch }, id),
+          message,
+        );
+    }
+    assert.deepEqual(await repository.readMethods(db), before);
+    await repository.saveExpense(db, { ...insuranceInput, methodId: card.id });
+    const expenses = await repository.readExpenses(db);
+    await db.runAsync(
+      `UPDATE payment_methods SET cardTypeCode = NULL, bankId = NULL, settlementDay = NULL,
+      benefitTypeCode = NULL, benefitAmount = NULL WHERE id = ?`,
+      card.id,
+    );
+    await repository.initializeDatabase(db);
+    const legacy = (await repository.readMethods(db)).find(
+      (method) => method.id === card.id,
+    );
+    assert.equal(legacy.cardTypeCode, null);
+    assert.equal(legacy.benefitAmount, null);
+    assert.equal(legacy.bankId, null);
+    await assert.rejects(
+      repository.saveMethod(
+        db,
+        { ...legacy, providerCode: valid.providerCode },
+        card.id,
+      ),
+      /신용카드 또는 체크카드/,
+    );
+    await repository.saveMethod(db, valid, card.id);
+    assert.deepEqual(await repository.readMethods(db), before);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("method form reveals errors after blur or submit, clears corrected fields and focuses the first visible error", async () => {
+  const fixture = methodFormFixture({
+    methods: [{ ...bankInput, id: 1, provider: "KB국민은행" }],
+    saveMethod: async () => assert.fail("Incomplete form must not save"),
+  });
+  const { render, control, component, revealed, focused } = fixture;
+  assert.equal(
+    render().some((node) => node.props?.error),
+    false,
+  );
+  control("카드 이름").onBlur();
+  assert.ok(control("카드 이름").error);
+  assert.equal(control("카드 종류").error, "");
+  control("카드 이름").onChangeText("생활 카드");
+  assert.equal(control("카드 이름").error, "");
+  control("저장").onPress();
+  await settle();
+  assert.equal(revealed.at(-1), "cardTypeCode");
+  assert.equal(focused.at(-1), "cardTypeCode");
+  assert.ok(control("카드 종류").error);
+  assert.ok(component("ProviderSelect").error);
+  assert.ok(control("출금 통장").error);
+  assert.ok(control("월 혜택").error);
+  assert.ok(control("월 혜택 금액 (원)").error);
+  control("카드 종류").onChange("credit");
+  assert.equal(control("카드 종류").error, "");
+  assert.ok(control("출금일").error);
+  control("저장").onPress();
+  await settle();
+  assert.equal(revealed.at(-1), "providerCode");
+  component("ProviderSelect").onChange("card_samsung");
+  assert.equal(component("ProviderSelect").error, "");
+  control("월 혜택 금액 (원)").onChangeText("0");
+  assert.equal(control("월 혜택 금액 (원)").error, "");
+  assert.equal(control("저장").disabled, false);
+});
+
+test("shared fields expose visual error feedback and modal navigation waits for layout before scrolling and focusing", () => {
+  const uiRuntime = () =>
+    hookRuntime("src/components/ui.tsx", {
+      "./typography": { AppText: "Text", AppTextInput: "Input" },
+      "react-native": {
+        View: "View",
+        Modal: "Modal",
+        Pressable: "Pressable",
+        ScrollView: "ScrollView",
+        KeyboardAvoidingView: "KeyboardAvoidingView",
+        ActivityIndicator: "Spinner",
+        Keyboard: { dismiss: () => {} },
+        Platform: { OS: "ios" },
+        StyleSheet: { create: (styles) => styles },
+      },
+      "react-native-safe-area-context": {
+        SafeAreaProvider: "SafeAreaProvider",
+        SafeAreaView: "SafeAreaView",
+      },
+      "@expo/vector-icons/Ionicons": { default: "Icon" },
+      "../hooks/use-month-pin": { useMonthPin: () => ({}) },
+    });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const fields = uiRuntime();
+  const tree = fields.render((ui) =>
+    ui.Field({
+      label: "카드 이름",
+      value: "",
+      onChangeText: () => {},
+      placeholder: "",
+      required: true,
+      error: "카드 이름을 입력해 주세요.",
+    }),
+  );
+  const input = flatten(tree).find((node) => node.type === "Input");
+  assert.equal(input.props.accessibilityHint, "카드 이름을 입력해 주세요.");
+  assert.ok(
+    input.props.style.some(
+      (style) => style?.borderColor === fields.module.colors.red,
+    ),
+  );
+  const feedback = fields.module.FieldMessage({
+    error: input.props.accessibilityHint,
+  });
+  assert.equal(feedback.props.accessibilityRole, "alert");
+  assert.ok(
+    flatten(feedback).some(
+      (node) => node.props?.name === "alert-circle-outline",
+    ),
+  );
+  const modal = uiRuntime();
+  const nodes = flatten(
+    modal.render((ui) =>
+      ui.FormModal({ title: "카드 등록", onClose: () => {}, children: null }),
+    ),
+  );
+  const scroll = nodes.find((node) => node.type === "ScrollView");
+  const provider = nodes.find(
+    (node) => typeof node.props?.value === "function",
+  );
+  const container = { id: "form-content" };
+  provider.props.children.props.ref.current = container;
+  const scrolls = [];
+  scroll.props.ref.current = { scrollTo: (options) => scrolls.push(options) };
+  const frames = [];
+  const original = global.requestAnimationFrame;
+  global.requestAnimationFrame = (callback) => frames.push(callback);
+  let focused = 0;
+  try {
+    provider.props.value(
+      {
+        measureLayout: (ancestor, success) => {
+          assert.equal(ancestor, container);
+          success(0, 240);
+        },
+      },
+      () => focused++,
+    );
+    assert.equal(focused, 0);
+    assert.equal(scrolls.length, 0);
+    frames.shift()();
+    assert.deepEqual(scrolls, [{ y: 228, animated: true }]);
+    assert.equal(focused, 1);
+    provider.props.value(
+      { measureLayout: (_ancestor, _success, fail) => fail() },
+      () => focused++,
+    );
+    frames.shift()();
+    assert.equal(focused, 2);
+  } finally {
+    if (original) global.requestAnimationFrame = original;
+    else delete global.requestAnimationFrame;
+  }
+});
+
+test("reordering classified cards keeps legacy card positions and references across reopen", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    for (const name of ["A", "기존 카드", "B"])
+      await repository.saveMethod(db, {
+        ...cardBenefitDefaults,
+        kind: "card",
+        providerCode: "card_samsung",
+        cardTypeCode: "credit",
+        name,
+        bankId: bank.id,
+        settlementDay: 25,
+      });
+    const cards = (await repository.readMethods(db)).filter(
+      (method) => method.kind === "card",
+    );
+    const [a, legacy, b] = cards;
+    await db.runAsync(
+      "UPDATE payment_methods SET cardTypeCode = NULL WHERE id = ?",
+      legacy.id,
+    );
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      methodId: legacy.id,
+    });
+    const expenses = await repository.readExpenses(db);
+    const current = (await repository.readMethods(db)).filter(
+      (method) => method.kind === "card",
+    );
+    const legacyBefore = current.find((method) => method.id === legacy.id);
+    const merged = domain.mergePaymentMethodOrder(current, [b, a]);
+    assert.deepEqual(
+      merged.map((method) => method.id),
+      [b.id, legacy.id, a.id],
+    );
+    await repository.reorderMethods(
+      db,
+      "card",
+      merged.map((method) => method.id),
+    );
+    await repository.initializeDatabase(db);
+    const saved = await repository.readMethods(db);
+    assert.deepEqual(
+      saved.find((method) => method.id === legacy.id),
+      legacyBefore,
+    );
+    assert.deepEqual(
+      domain
+        .groupCardMethods(saved)
+        .flatMap((section) => section.data.map((method) => method.id)),
+      [b.id, a.id],
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("card monthly benefits persist, switch types and allow zero while rejecting blank values without changing history", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-benefits-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    const input = {
+      kind: "card",
+      providerCode: "card_samsung",
+      name: "월 혜택 카드",
+      bankId: bank.id,
+      settlementDay: 25,
+      cardTypeCode: "credit",
+      benefitTypeCode: "fixed",
+      benefitAmount: 10000,
+    };
+    await repository.saveMethod(db, input);
+    const card = (await repository.readMethods(db)).find(
+      (m) => m.kind === "card",
+    );
+    await repository.saveExpense(db, { ...insuranceInput, methodId: card.id });
+    const expenses = await repository.readExpenses(db);
+    const month = ledgerDomain.monthKey();
+    const entries = await ledgerRepository.loadLedgerMonth(db, month);
+    assert.equal(domain.cardBenefitLabel(card), "월 고정 혜택 10,000원");
+    assert.equal(domain.cardBenefitLabel(bank), null);
+    assert.equal(domain.parseAmount("0", 0), 0);
+    assert.equal(domain.parseAmount("0"), null);
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      (await repository.readMethods(db)).find((m) => m.id === card.id),
+      card,
+    );
+
+    const variable = {
+      ...input,
+      benefitTypeCode: "variable",
+      benefitAmount: 12500,
+    };
+    await repository.saveMethod(db, variable, card.id);
+    let saved = (await repository.readMethods(db)).find(
+      (m) => m.id === card.id,
+    );
+    assert.equal(domain.cardBenefitLabel(saved), "월 변동 혜택 예상 12,500원");
+    assert.deepEqual(
+      { ...saved },
+      {
+        ...card,
+        benefitTypeCode: "variable",
+        benefitAmount: 12500,
+      },
+    );
+    await repository.saveMethod(
+      db,
+      {
+        ...variable,
+        benefitAmount: 0,
+        cardTypeCode: "debit",
+        settlementDay: null,
+      },
+      card.id,
+    );
+    saved = (await repository.readMethods(db)).find((m) => m.id === card.id);
+    assert.equal(saved.benefitAmount, 0);
+    assert.equal(domain.cardBenefitLabel(saved), "월 변동 혜택 예상 0원");
+    assert.equal(saved.bankId, bank.id);
+
+    const methods = await repository.readMethods(db);
+    assert.equal(domain.paymentMethodsTotal(methods, methods, expenses), 50000);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, month),
+      entries,
+    );
+    await assert.rejects(
+      repository.saveMethod(
+        db,
+        { ...input, benefitTypeCode: null, benefitAmount: null },
+        card.id,
+      ),
+      /월 혜택/,
+    );
+    saved = (await repository.readMethods(db)).find((m) => m.id === card.id);
+    assert.equal(saved.benefitTypeCode, "variable");
+    assert.equal(saved.benefitAmount, 0);
+    assert.equal(domain.cardBenefitLabel(saved), "월 변동 혜택 예상 0원");
+    assert.deepEqual(
+      (await repository.readMethods(db)).find((m) => m.id === bank.id),
+      bank,
+    );
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("card benefit validation and SQLite constraints reject invalid codes, incomplete pairs and bank benefits", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const input = {
+      kind: "card",
+      providerCode: "card_samsung",
+      name: "혜택 카드",
+      bankId: (await repository.readMethods(db))[0].id,
+      settlementDay: 25,
+      cardTypeCode: "credit",
+      benefitTypeCode: "fixed",
+      benefitAmount: 10000,
+    };
+    await repository.saveMethod(db, input);
+    const methods = await repository.readMethods(db);
+    const card = methods.find((m) => m.kind === "card");
+    const bank = methods.find((m) => m.kind === "bank");
+    for (const patch of [
+      { benefitTypeCode: "고정" },
+      { benefitTypeCode: "unknown" },
+      { benefitTypeCode: null },
+      { benefitAmount: null },
+      { benefitAmount: -1 },
+      { benefitAmount: 1.5 },
+      { benefitAmount: 1000000000 },
+      { benefitAmount: "10000" },
+      { benefitAmount: NaN },
+      { benefitAmount: Infinity },
+    ]) {
+      await assert.rejects(
+        repository.saveMethod(db, { ...input, ...patch }, card.id),
+        /월 혜택/,
+      );
+    }
+    await assert.rejects(
+      repository.saveMethod(
+        db,
+        { ...bankInput, benefitTypeCode: "fixed", benefitAmount: 10000 },
+        bank.id,
+      ),
+      /통장에는 카드 혜택/,
+    );
+    for (const [id, type, amount] of [
+      [card.id, "고정", 10000],
+      [card.id, null, 10000],
+      [card.id, "fixed", null],
+      [card.id, "fixed", -1],
+      [card.id, "variable", 1.5],
+      [card.id, "fixed", 1000000000],
+      [bank.id, "fixed", 10000],
+    ]) {
+      await assert.rejects(
+        db.runAsync(
+          "UPDATE payment_methods SET benefitTypeCode = ?, benefitAmount = ? WHERE id = ?",
+          type,
+          amount,
+          id,
+        ),
+        /CHECK constraint/,
+      );
+    }
+    assert.deepEqual(await repository.readMethods(db), methods);
+    await repository.saveMethod(
+      db,
+      { ...input, benefitAmount: 999999999 },
+      card.id,
+    );
+    assert.equal(
+      (await repository.readMethods(db)).find((m) => m.id === card.id)
+        .benefitAmount,
+      999999999,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v12 benefit migration preserves data and references, rolls back failures, retries and keeps saved benefits on reinitialization", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    const input = {
+      ...cardBenefitDefaults,
+      kind: "card",
+      providerCode: "card_samsung",
+      name: "기존 카드",
+      bankId: bank.id,
+      settlementDay: 25,
+      cardTypeCode: "credit",
+    };
+    await repository.saveMethod(db, input);
+    const card = (await repository.readMethods(db)).find(
+      (m) => m.kind === "card",
+    );
+    await repository.saveExpense(db, { ...insuranceInput, methodId: card.id });
+    const month = ledgerDomain.monthKey();
+    const entries = await ledgerRepository.loadLedgerMonth(db, month);
+    const expenses = await repository.readExpenses(db);
+    await db.execAsync(`ALTER TABLE payment_methods DROP COLUMN benefitAmount;
+      ALTER TABLE payment_methods DROP COLUMN benefitTypeCode;
+      PRAGMA user_version = 12;`);
+    const legacyMethods = await db.getAllAsync(
+      "SELECT * FROM payment_methods ORDER BY id",
+    );
+    const sequence = await db.getAllAsync(
+      "SELECT * FROM sqlite_sequence ORDER BY name",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 13;")
+        throw new Error("Simulated benefit migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated benefit migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      12,
+    );
+    assert.ok(
+      !(await db.getAllAsync("PRAGMA table_info(payment_methods)")).some(
+        (column) =>
+          column.name === "benefitTypeCode" || column.name === "benefitAmount",
+      ),
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
+      legacyMethods,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      15,
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
+      legacyMethods.map((method) =>
+        Object.assign(Object.create(Object.getPrototypeOf(method)), method, {
+          benefitTypeCode: null,
+          benefitAmount: null,
+        }),
+      ),
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM sqlite_sequence ORDER BY name"),
+      sequence,
+    );
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(
+      await ledgerRepository.loadLedgerMonth(db, month),
+      entries,
+    );
+    await repository.saveMethod(
+      db,
+      { ...input, benefitTypeCode: "variable", benefitAmount: 10000 },
+      card.id,
+    );
+    const methods = await repository.readMethods(db);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+    await assert.rejects(
+      db.runAsync(
+        "UPDATE payment_methods SET benefitAmount = NULL WHERE id = ?",
+        card.id,
+      ),
+      /CHECK constraint/,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("monthly benefit summaries use confirmed actuals including zero and otherwise retain estimates", () => {
+  const cards = [
+    {
+      methodId: 1,
+      benefitTypeCode: "fixed",
+      expectedAmount: 10000,
+      amount: 10000,
+    },
+    {
+      methodId: 2,
+      benefitTypeCode: "variable",
+      expectedAmount: 2500,
+      amount: null,
+    },
+    {
+      methodId: 3,
+      benefitTypeCode: "variable",
+      expectedAmount: 5000,
+      amount: null,
+    },
+  ];
+  assert.deepEqual(
+    cardBenefitDomain.cardBenefitMonthSummary({ cards, confirmed: false }),
+    {
+      total: 17500,
+      variableCount: 2,
+      pending: 2,
+      confirmed: false,
+    },
+  );
+  assert.deepEqual(
+    cardBenefitDomain.cardBenefitMonthSummary({
+      cards: cards.map((card) => ({
+        ...card,
+        amount: card.methodId === 1 ? 10000 : 0,
+      })),
+      confirmed: true,
+    }),
+    {
+      total: 10000,
+      variableCount: 2,
+      pending: 0,
+      confirmed: true,
+    },
+  );
+  assert.deepEqual(cardBenefitDomain.cardBenefitMonthSummary(null), {
+    total: 0,
+    variableCount: 0,
+    pending: 0,
+    confirmed: false,
+  });
+});
+
+test("expense views open on the calendar and retain both views while toggling and revisiting the tab", () => {
+  const runtime = hookRuntime("src/app/(tabs)/expenses.tsx", {
+    "react-native": { View: "View" },
+    "../../components/expense-list-view": { ExpenseListView: "ListView" },
+    "../../components/expense-calendar-view": {
+      ExpenseCalendarView: "CalendarView",
+    },
+    "../../components/expense-view-button": { ExpenseViewButton: "Switcher" },
+    "../../components/ui": { s: { flex: {} } },
+    "../../hooks/use-month-pin": { useMonthPin: () => ({ busy: false }) },
+  });
+  const render = () => {
+    const root = runtime.render((module) => module.default());
+    const wrappers = root.props.children;
+    const list = wrappers[0].props.children;
+    const calendar = wrappers[1].props.children;
+    return {
+      wrappers,
+      list,
+      calendar,
+      switcher: calendar.props.viewSwitcher.props,
+    };
+  };
+  let view = render();
+  assert.equal(view.switcher.value, "calendar");
+  assert.equal(view.calendar.props.active, true);
+  assert.equal(view.list.props.active, false);
+  assert.equal(view.wrappers[0].props.accessibilityElementsHidden, true);
+  view.switcher.onChange("list");
+  view = render();
+  assert.equal(view.switcher.value, "list");
+  assert.equal(view.list.props.active, true);
+  assert.equal(view.calendar.props.active, false);
+  assert.equal(view.wrappers[1].props.accessibilityElementsHidden, true);
+  runtime.focus(false);
+  runtime.focus(true);
+  assert.equal(render().switcher.value, "list");
+  view.switcher.onChange("calendar");
+  assert.equal(render().calendar.props.active, true);
+});
+
+test("calendar estimates follow month totals and card edits without changing day entries or showing stale amounts during loading", () => {
+  const entries = [
+    { id: 1, day: 1, amount: 50000, methodId: 1, amountTypeCode: "fixed" },
+    { id: 2, day: 2, amount: 15000, methodId: 1, amountTypeCode: "variable" },
+    { id: 3, day: 1, amount: null, methodId: null, amountTypeCode: "variable" },
+    { id: 4, day: 3, amount: 0, methodId: null, amountTypeCode: "variable" },
+  ];
+  const original = structuredClone(entries);
+  const store = {
+    busy: false,
+    methods: [
+      {
+        id: 1,
+        kind: "card",
+        cardTypeCode: "credit",
+        benefitTypeCode: "fixed",
+        benefitAmount: 10000,
+      },
+      {
+        id: 2,
+        kind: "card",
+        cardTypeCode: "debit",
+        benefitTypeCode: "variable",
+        benefitAmount: 2500,
+      },
+      { id: 3, kind: "card", benefitTypeCode: null, benefitAmount: null },
+    ],
+  };
+  let snapshot = { entries, loading: false, error: null };
+  let confirmedBenefits = null;
+  let requestedMonth;
+  let requestedActive;
+  let retries = 0;
+  const runtime = hookRuntime("src/components/expense-calendar-view.tsx", {
+    "react-native": {
+      ActivityIndicator: "Spinner",
+      FlatList: "FlatList",
+      Pressable: "Pressable",
+      View: "View",
+      StyleSheet: { create: (value) => value, hairlineWidth: 1 },
+    },
+    "./typography": { AppText: "Text" },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "../hooks/use-month-pin": { useMonthPin: () => store },
+    "../hooks/use-ledger-month": {
+      useLedgerMonth: (month, active) => {
+        requestedMonth = month;
+        requestedActive = active;
+        return { ...snapshot, retry: () => retries++ };
+      },
+    },
+    "../hooks/use-card-benefit-month": {
+      useCardBenefitMonth: (month) => ({
+        snapshot: confirmedBenefits ?? {
+          month,
+          confirmed: false,
+          cards: store.methods
+            .filter(
+              (method) =>
+                method.kind === "card" &&
+                method.benefitTypeCode &&
+                method.benefitAmount !== null,
+            )
+            .map((method) => ({
+              methodId: method.id,
+              benefitTypeCode: method.benefitTypeCode,
+              expectedAmount: method.benefitAmount,
+              amount:
+                method.benefitTypeCode === "fixed"
+                  ? method.benefitAmount
+                  : null,
+            })),
+        },
+        loading: false,
+        error: null,
+        retry: () => {},
+      }),
+    },
+    "../utils/card-benefits": cardBenefitDomain,
+    "./card-benefit-form": { CardBenefitForm: "BenefitForm" },
+    "../utils/ledger": ledgerDomain,
+    "../utils/expenses": domain,
+    "./list-controls": { RegisterButton: "RegisterButton" },
+    "./expense-form": { ExpenseForm: "ExpenseForm" },
+    "./ledger-calendar": { LedgerCalendar: "Calendar" },
+    "./ledger-entry-row": { LedgerEntryRow: "EntryRow" },
+    "./ledger-amount-form": { LedgerAmountForm: "AmountForm" },
+    "./ui": {
+      Button: "Button",
+      Empty: "Empty",
+      FormModal: "Modal",
+      Header: "Header",
+      Screen: "Screen",
+      s: {},
+      colors: {},
+    },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = (active = true) => {
+    const root = runtime.render(({ ExpenseCalendarView }) =>
+      ExpenseCalendarView({ active, viewSwitcher: null }),
+    );
+    const list = flatten(root).find((node) => node.type === "FlatList").props;
+    const nodes = flatten([list.ListHeaderComponent, list.ListFooterComponent]);
+    return {
+      root,
+      list,
+      nodes,
+      label: (prefix) =>
+        nodes.find((node) =>
+          node.props?.accessibilityLabel?.startsWith(prefix),
+        ),
+      calendar: nodes.find((node) => node.type === "Calendar")?.props,
+    };
+  };
+  let view = render();
+  const firstMonth = requestedMonth;
+  assert.equal(view.label("월 지출 합계").props.children, "65,000원");
+  assert.equal(
+    view.label("월 지출 합계").props.accessibilityLabel,
+    "월 지출 합계 65,000원, 전체 4건, 미입력 1건",
+  );
+  assert.deepEqual(view.label("예상 혜택").props.children, ["−", "12,500원"]);
+  assert.equal(view.label("혜택 반영 예상액").props.children, "52,500원");
+  view.calendar.onSelect(1);
+  view = render();
+  assert.deepEqual(
+    view.list.data.map((entry) => entry.id),
+    [1, 3],
+  );
+  assert.equal(view.label("혜택 반영 예상액").props.children, "52,500원");
+  render(false);
+  assert.equal(requestedActive, false);
+  view = render();
+  assert.equal(view.calendar.selectedDay, 1);
+  assert.equal(requestedMonth, firstMonth);
+  store.methods = store.methods.map((method) =>
+    method.id === 2 ? { ...method, benefitAmount: 5000 } : method,
+  );
+  view = render();
+  assert.equal(view.label("혜택 반영 예상액").props.children, "50,000원");
+  view.nodes
+    .find((node) => node.props?.accessibilityLabel === "다음 달")
+    .props.onPress();
+  snapshot = {
+    entries: [{ id: 5, day: 1, amount: 1000 }],
+    loading: false,
+    error: null,
+  };
+  view = render();
+  assert.equal(requestedMonth, ledgerDomain.moveMonth(firstMonth, 1));
+  assert.equal(view.label("월 지출 합계").props.children, "1,000원");
+  assert.equal(view.label("혜택 반영 예상액").props.children, "-14,000원");
+  view.calendar.onSelect(ledgerDomain.daysInMonth(requestedMonth));
+  view = render();
+  assert.equal(view.list.ListEmptyComponent, null);
+  view.label("카드 혜택 정산").props.onPress();
+  view = render();
+  assert.equal(
+    flatten(view.root).find((node) => node.type === "BenefitForm").props
+      .snapshot.month,
+    requestedMonth,
+  );
+  confirmedBenefits = {
+    month: requestedMonth,
+    confirmed: true,
+    cards: [
+      {
+        methodId: 1,
+        benefitTypeCode: "fixed",
+        expectedAmount: 10000,
+        amount: 10000,
+      },
+      {
+        methodId: 2,
+        benefitTypeCode: "variable",
+        expectedAmount: 5000,
+        amount: 0,
+      },
+    ],
+  };
+  view = render();
+  assert.deepEqual(view.label("확정 혜택").props.children, ["−", "10,000원"]);
+  assert.equal(view.label("혜택 반영 예상액").props.children, "-9,000원");
+  assert.equal(view.calendar.benefitsConfirmed, true);
+  confirmedBenefits = null;
+  snapshot = { ...snapshot, loading: true };
+  view = render();
+  assert.equal(view.label("혜택 반영 예상액"), undefined);
+  assert.deepEqual(view.list.data, []);
+  snapshot = { ...snapshot, loading: false, error: "조회 실패" };
+  view = render();
+  assert.equal(view.label("혜택 반영 예상액"), undefined);
+  view.nodes
+    .find((node) => node.type === "Button" && node.props.label === "다시 시도")
+    .props.onPress();
+  assert.equal(retries, 1);
+  store.methods = [];
+  snapshot = { entries: [], loading: false, error: null };
+  view = render();
+  assert.equal(view.label("월 지출 합계").props.children, "0원");
+  assert.equal(view.label("혜택 반영 예상액").props.children, "0원");
+  assert.deepEqual(view.label("예상 혜택").props.children, ["", "0원"]);
+  assert.deepEqual(entries, original);
+});
+
+async function seedSettlementCards(db) {
+  await repository.saveMethod(db, bankInput);
+  const bank = (await repository.readMethods(db))[0];
+  const input = {
+    kind: "card",
+    providerCode: "card_samsung",
+    name: "같은 카드",
+    bankId: bank.id,
+    settlementDay: 25,
+    cardTypeCode: "credit",
+    benefitTypeCode: "variable",
+    benefitAmount: 5000,
+  };
+  for (const patch of [
+    { name: "고정 카드", benefitTypeCode: "fixed", benefitAmount: 10000 },
+    {},
+    { cardTypeCode: "debit", settlementDay: null, benefitAmount: 3000 },
+  ])
+    await repository.saveMethod(db, { ...input, ...patch });
+  // These settlement fixtures model cards already held before the test months.
+  await db.runAsync(
+    "UPDATE card_benefit_versions SET effectiveMonth = '1000-01'",
+  );
+  const cards = (await repository.readMethods(db))
+    .filter((method) => method.kind === "card")
+    .sort((a, b) => a.id - b.id);
+  return { bank, fixed: cards[0], first: cards[1], second: cards[2], input };
+}
+
+test("monthly benefit confirmation stores zero and snapshots once per card, preserves ledger totals and history after edits or deletion", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { fixed, first, second, input } = await seedSettlementCards(db);
+    await repository.saveExpense(db, { ...insuranceInput, methodId: first.id });
+    const entries = await ledgerRepository.loadLedgerMonth(db, "2024-02");
+    const methods = await repository.readMethods(db);
+    const preview = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-02",
+    );
+    assert.equal(preview.confirmed, false);
+    assert.equal(
+      cardBenefitDomain.cardBenefitMonthSummary(preview).total,
+      18000,
+    );
+    assert.equal(
+      preview.cards.filter((card) => card.amount === null).length,
+      2,
+    );
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2024-02", [
+      { methodId: first.id, amount: 0 },
+      { methodId: second.id, amount: 1200 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-02",
+    );
+    assert.equal(confirmed.confirmed, true);
+    assert.equal(
+      cardBenefitDomain.cardBenefitMonthSummary(confirmed).total,
+      11200,
+    );
+    assert.equal(
+      confirmed.cards.find((card) => card.methodId === first.id).amount,
+      0,
+    );
+    assert.equal(
+      confirmed.cards.filter((card) => card.name === "같은 카드").length,
+      2,
+    );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(
+      await ledgerRepository.readLedgerMonth(db, "2024-02"),
+      entries,
+    );
+    const march = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-03",
+    );
+    assert.equal(march.confirmed, false);
+    assert.equal(cardBenefitDomain.cardBenefitMonthSummary(march).total, 18000);
+    await repository.saveMethod(
+      db,
+      {
+        ...input,
+        name: "바뀐 고정 카드",
+        benefitTypeCode: "fixed",
+        benefitAmount: 20000,
+      },
+      fixed.id,
+    );
+    await repository.deleteMethod(db, first.id);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, "2024-02"),
+      confirmed,
+    );
+    const next = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-03",
+    );
+    assert.equal(cardBenefitDomain.cardBenefitMonthSummary(next).total, 18000);
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2024-02", [
+      { methodId: first.id, amount: 600 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    const edited = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-02",
+    );
+    assert.equal(
+      cardBenefitDomain.cardBenefitMonthSummary(edited).total,
+      10600,
+    );
+    assert.equal(
+      edited.cards.find((card) => card.methodId === fixed.id).amount,
+      10000,
+    );
+    assert.equal(
+      edited.cards.find((card) => card.methodId === fixed.id).name,
+      "고정 카드",
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("benefit confirmation rejects incomplete, duplicate and invalid values, rolls back partial writes and preserves previous confirmations", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second, fixed } = await seedSettlementCards(db);
+    const inputs = [
+      { methodId: first.id, amount: 0 },
+      { methodId: second.id, amount: 3000 },
+    ];
+    for (const invalid of [
+      [],
+      inputs.slice(0, 1),
+      [inputs[0], inputs[0]],
+      [{ methodId: fixed.id, amount: 0 }, inputs[1]],
+      ...[-1, 0.5, NaN, Infinity, 1000000000, null].map((amount) => [
+        { ...inputs[0], amount },
+        inputs[1],
+      ]),
+    ])
+      await assert.rejects(
+        cardBenefitRepository.saveCardBenefitMonth(db, "2026-04", invalid),
+        /변동 카드별/,
+      );
+    for (const month of ["2026-00", "2026-13", "0000-01", "2026-4"])
+      await assert.rejects(
+        cardBenefitRepository.saveCardBenefitMonth(db, month, inputs),
+        /월을/,
+      );
+    const run = db.runAsync;
+    let writes = 0;
+    db.runAsync = async (sql, ...params) => {
+      const result = await run(sql, ...params);
+      if (sql.includes("INSERT INTO monthly_card_benefits") && ++writes === 2)
+        throw new Error("Simulated settlement failure");
+      return result;
+    };
+    await assert.rejects(
+      cardBenefitRepository.saveCardBenefitMonth(db, "2026-04", inputs),
+      /Simulated settlement failure/,
+    );
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM monthly_card_benefits"),
+      [],
+    );
+    db.runAsync = run;
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2026-04", inputs);
+    const before = await db.getAllAsync(
+      "SELECT * FROM monthly_card_benefits ORDER BY id",
+    );
+    writes = 0;
+    db.runAsync = async (sql, ...params) => {
+      const result = await run(sql, ...params);
+      if (sql.includes("INSERT INTO monthly_card_benefits") && ++writes === 2)
+        throw new Error("Simulated edit failure");
+      return result;
+    };
+    await assert.rejects(
+      cardBenefitRepository.saveCardBenefitMonth(
+        db,
+        "2026-04",
+        inputs.map((input) => ({ ...input, amount: 9000 })),
+      ),
+      /Simulated edit failure/,
+    );
+    db.runAsync = run;
+    assert.deepEqual(
+      await db.getAllAsync("SELECT * FROM monthly_card_benefits ORDER BY id"),
+      before,
+    );
+    for (const sql of [
+      "UPDATE monthly_card_benefits SET amount = -1",
+      "UPDATE monthly_card_benefits SET amount = NULL",
+      "UPDATE monthly_card_benefits SET benefitTypeCode = 'unknown'",
+      "UPDATE monthly_card_benefits SET month = '2026-13'",
+      "UPDATE monthly_card_benefits SET amount = 1 WHERE benefitTypeCode = 'fixed'",
+    ])
+      await assert.rejects(db.runAsync(sql), /constraint/);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v13 settlement migration preserves legacy data, rolls back and retries, and confirmed records survive reopening", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-settlement-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second } = await seedSettlementCards(db);
+    await repository.saveExpense(db, { ...insuranceInput, methodId: first.id });
+    const ledger = await ledgerRepository.loadLedgerMonth(db, "2026-10");
+    const methods = await repository.readMethods(db);
+    const expenses = await repository.readExpenses(db);
+    await db.execAsync(
+      "DROP TABLE monthly_card_benefits; PRAGMA user_version = 13;",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 14;")
+        throw new Error("Simulated settlement migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated settlement migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      13,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'monthly_card_benefits'",
+      ),
+      undefined,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      15,
+    );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(await repository.readExpenses(db), expenses);
+    assert.deepEqual(
+      await ledgerRepository.readLedgerMonth(db, "2026-10"),
+      ledger,
+    );
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2026-10", [
+      { methodId: first.id, amount: 999999999 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2026-10",
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, "2026-10"),
+      confirmed,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("benefit month snapshots reject stale responses, refresh after writes and recover from failed reads", async () => {
+  const requests = [];
+  const store = {
+    busy: false,
+    dataRevision: 0,
+    loadCardBenefitMonth: (month) =>
+      new Promise((resolve, reject) =>
+        requests.push({ month, resolve, reject }),
+      ),
+  };
+  const runtime = hookRuntime("src/hooks/use-card-benefit-month.ts", {
+    "./use-month-pin": { useMonthPin: () => store },
+  });
+  const render = (month = "2024-02", active = true) =>
+    runtime.render(({ useCardBenefitMonth }) =>
+      useCardBenefitMonth(month, active),
+    );
+  render();
+  runtime.flush();
+  render("2024-03");
+  runtime.flush();
+  requests[0].resolve({ month: "2024-02", confirmed: true, cards: [] });
+  await settle();
+  assert.equal(render("2024-03").snapshot, null);
+  requests[1].reject(new Error("read failed"));
+  await settle();
+  let view = render("2024-03");
+  assert.ok(view.error);
+  view.retry();
+  render("2024-03");
+  runtime.flush();
+  requests[2].resolve({ month: "2024-03", confirmed: true, cards: [] });
+  await settle();
+  assert.equal(render("2024-03").snapshot.confirmed, true);
+  store.busy = true;
+  assert.equal(render("2024-03").snapshot, null);
+  runtime.flush();
+  store.busy = false;
+  store.dataRevision++;
+  render("2024-03");
+  runtime.flush();
+  requests[3].resolve({ month: "2024-03", confirmed: false, cards: [] });
+  await settle();
+  assert.equal(render("2024-03").snapshot.confirmed, false);
+  render("2024-03", false);
+  runtime.flush();
+  assert.equal(requests.length, 4);
+  render("2024-03");
+  runtime.flush();
+  assert.equal(requests.length, 5);
+});
+
+test("calendar marks only each month's last day for benefit settlement, including leap February and months with no expenses", () => {
+  const runtime = hookRuntime("src/components/ledger-calendar.tsx", {
+    "react-native": {
+      Pressable: "Pressable",
+      View: "View",
+      StyleSheet: { create: (value) => value },
+    },
+    "./typography": { AppText: "Text" },
+    "../utils/ledger": ledgerDomain,
+    "../utils/expenses": domain,
+    "./ui": { colors: { orange: "#E67824", green: "#16835D" } },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  for (const [month, lastDay] of [
+    ["2024-02", 29],
+    ["2026-02", 28],
+    ["2026-04", 30],
+    ["2026-10", 31],
+  ]) {
+    let selected;
+    const render = (benefitsConfirmed, entries = []) =>
+      flatten(
+        runtime.render(({ LedgerCalendar }) =>
+          LedgerCalendar({
+            month,
+            entries,
+            selectedDay: 1,
+            benefitsConfirmed,
+            benefitsPending: !benefitsConfirmed,
+            onSelect: (day) => (selected = day),
+          }),
+        ),
+      );
+    let cells = render(false).filter((node) =>
+      node.props?.accessibilityLabel?.includes("카드 혜택 정산"),
+    );
+    assert.equal(cells.length, 1);
+    const flattenedStyle = (style) => Object.assign({}, ...[style].flat());
+    const dots = (cell) =>
+      flatten(cell).filter(
+        (node) =>
+          node.type === "View" && flattenedStyle(node.props.style).width === 6,
+      );
+    const dotColors = (cell) =>
+      dots(cell).map(
+        (node) => flattenedStyle(node.props.style).backgroundColor,
+      );
+    assert.deepEqual(dotColors(cells[0]), ["#16835D"]);
+    const children = cells[0].props.children.filter(Boolean);
+    assert.equal(children.at(-1).type, "View");
+    assert.equal(children[0].type, "Text");
+    assert.equal(
+      children.some(
+        (node) =>
+          node.type === "Text" &&
+          typeof node.props.children === "string" &&
+          node.props.children.includes("혜택"),
+      ),
+      false,
+    );
+    assert.ok(cells[0].props.accessibilityLabel.includes(`${lastDay}일`));
+    cells[0].props.onPress();
+    assert.equal(selected, lastDay);
+    cells = render(true).filter((node) =>
+      node.props?.accessibilityLabel?.includes("카드 혜택 정산"),
+    );
+    assert.ok(cells[0].props.accessibilityLabel.includes("확정 완료"));
+    assert.equal(dots(cells[0]).length, 0);
+    for (const confirmed of [false, true]) {
+      const withPendingExpense = render(confirmed, [
+        { id: 1, day: lastDay, amount: null },
+      ]).find((node) =>
+        node.props?.accessibilityLabel?.includes("카드 혜택 정산"),
+      );
+      assert.deepEqual(
+        dotColors(withPendingExpense),
+        confirmed ? ["#E67824"] : ["#E67824", "#16835D"],
+      );
+    }
+  }
+});
+
+test("benefit form requires every variable actual, accepts zero, prevents duplicate submits and keeps edits after a failed save", async () => {
+  let fail = false;
+  let resolveSave;
+  const saves = [];
+  let closed = 0;
+  const snapshot = {
+    month: "2024-02",
+    confirmed: false,
+    cards: [
+      {
+        methodId: 1,
+        name: "고정",
+        providerName: "국민",
+        benefitTypeCode: "fixed",
+        expectedAmount: 10000,
+        amount: 10000,
+      },
+      {
+        methodId: 2,
+        name: "동일 이름",
+        providerName: "삼성",
+        benefitTypeCode: "variable",
+        expectedAmount: 5000,
+        amount: null,
+      },
+      {
+        methodId: 3,
+        name: "동일 이름",
+        providerName: "국민",
+        benefitTypeCode: "variable",
+        expectedAmount: 3000,
+        amount: null,
+      },
+    ],
+  };
+  const runtime = hookRuntime("src/components/card-benefit-form.tsx", {
+    "react-native": { View: "View" },
+    "./typography": { AppText: "Text" },
+    "../hooks/use-month-pin": {
+      useMonthPin: () => ({
+        busy: false,
+        saveCardBenefitMonth: (month, inputs) => {
+          saves.push({ month, inputs });
+          if (fail) return Promise.reject(new Error("save failed"));
+          return new Promise((resolve) => (resolveSave = resolve));
+        },
+      }),
+    },
+    "../utils/expenses": domain,
+    "../utils/ledger": ledgerDomain,
+    "./ui": {
+      Button: "Button",
+      Field: "Field",
+      FieldMessage: "FieldMessage",
+      s: {},
+      useFormNavigation: () => null,
+    },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = (current = snapshot) =>
+    flatten(
+      runtime.render(({ CardBenefitForm }) =>
+        CardBenefitForm({ snapshot: current, onClose: () => closed++ }),
+      ),
+    );
+  const fields = () =>
+    render()
+      .filter((node) => node.props?.card)
+      .map((node) => node.props);
+  const button = () => render().find((node) => node.type === "Button").props;
+  assert.equal(fields().length, 2);
+  assert.ok(
+    fields().every((field) => field.error === "" && field.value === ""),
+  );
+  button().onPress();
+  assert.equal(saves.length, 0);
+  assert.ok(fields().every((field) => field.error));
+  fields()[0].onChange("0");
+  fields()[1].onChange("1,250");
+  assert.ok(fields().every((field) => field.error === ""));
+  fail = true;
+  button().onPress();
+  await settle();
+  assert.equal(closed, 0);
+  assert.equal(fields()[1].value, "1,250");
+  assert.equal(
+    render().find((node) => node.type === "FieldMessage").props.error,
+    "save failed",
+  );
+  fail = false;
+  button().onPress();
+  button().onPress();
+  assert.equal(saves.length, 2);
+  assert.deepEqual(saves[1], {
+    month: "2024-02",
+    inputs: [
+      { methodId: 2, amount: 0 },
+      { methodId: 3, amount: 1250 },
+    ],
+  });
+  resolveSave();
+  await settle();
+  assert.equal(closed, 1);
+});
+
+test("benefit edits preserve earlier unconfirmed months and already confirmed actuals while replacing later scheduled estimates", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second, input } = await seedSettlementCards(db);
+    const now = ledgerDomain.monthKey();
+    const earlier = ledgerDomain.moveMonth(now, -2);
+    const next = ledgerDomain.moveMonth(now, 1);
+    const later = ledgerDomain.moveMonth(now, 2);
+    const confirmedMonth = ledgerDomain.moveMonth(now, 3);
+    await cardBenefitRepository.saveCardBenefitMonth(db, confirmedMonth, [
+      { methodId: first.id, amount: 7000 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      confirmedMonth,
+    );
+    await repository.saveMethod(
+      db,
+      { ...input, benefitTypeCode: "fixed", benefitAmount: 9000 },
+      first.id,
+      later,
+    );
+    const summary = async (month) =>
+      cardBenefitDomain.cardBenefitMonthSummary(
+        await cardBenefitRepository.loadCardBenefitMonth(db, month),
+      );
+    assert.equal((await summary(earlier)).total, 18000);
+    assert.equal((await summary(now)).total, 18000);
+    assert.equal((await summary(next)).total, 18000);
+    assert.equal((await summary(later)).total, 22000);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, confirmedMonth),
+      confirmed,
+    );
+    await repository.saveMethod(
+      db,
+      { ...input, benefitAmount: 6000 },
+      first.id,
+      next,
+    );
+    assert.equal((await summary(earlier)).total, 18000);
+    assert.equal((await summary(next)).total, 19000);
+    assert.equal((await summary(later)).total, 19000);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, confirmedMonth),
+      confirmed,
+    );
+    assert.deepEqual(
+      (
+        await db.getAllAsync(
+          "SELECT effectiveMonth FROM card_benefit_versions WHERE methodId = ? ORDER BY effectiveMonth",
+          first.id,
+        )
+      ).map((row) => row.effectiveMonth),
+      ["1000-01", next],
+    );
+    await repository.saveMethod(
+      db,
+      { ...input, name: "renamed", benefitAmount: 6000 },
+      first.id,
+    );
+    const current = await cardBenefitRepository.loadCardBenefitMonth(db, now);
+    assert.equal(
+      current.cards.find((card) => card.methodId === first.id).expectedAmount,
+      5000,
+    );
+    assert.equal((await summary(later)).total, 19000);
+    assert.equal(
+      (
+        await cardBenefitRepository.loadCardBenefitMonth(db, earlier)
+      ).cards.find((card) => card.methodId === first.id).name,
+      input.name,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("deleting a card preserves past and current estimates, excludes the next month and retains future confirmations", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second, input } = await seedSettlementCards(db);
+    const now = ledgerDomain.monthKey();
+    const previous = ledgerDomain.moveMonth(now, -1);
+    const next = ledgerDomain.moveMonth(now, 1);
+    const later = ledgerDomain.moveMonth(now, 2);
+    await repository.saveExpense(db, { ...insuranceInput, methodId: first.id });
+    const entries = await ledgerRepository.loadLedgerMonth(db, now);
+    await cardBenefitRepository.saveCardBenefitMonth(db, later, [
+      { methodId: first.id, amount: 700 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      later,
+    );
+    await repository.saveMethod(
+      db,
+      { ...input, benefitAmount: 9000 },
+      first.id,
+      later,
+    );
+    await repository.deleteMethod(db, first.id);
+    assert.ok(
+      !(await repository.readMethods(db)).some((card) => card.id === first.id),
+    );
+    for (const month of [previous, now]) {
+      const preview = await cardBenefitRepository.loadCardBenefitMonth(
+        db,
+        month,
+      );
+      assert.equal(preview.confirmed, false);
+      assert.equal(
+        preview.cards.find((card) => card.methodId === first.id).expectedAmount,
+        5000,
+      );
+    }
+    assert.equal(
+      (await cardBenefitRepository.loadCardBenefitMonth(db, next)).cards.some(
+        (card) => card.methodId === first.id,
+      ),
+      false,
+    );
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, later),
+      confirmed,
+    );
+    assert.deepEqual(await ledgerRepository.readLedgerMonth(db, now), entries);
+    assert.equal((await repository.readExpenses(db))[0].methodId, null);
+    // A deleted card can still be finalized in a preserved month and edited again.
+    await cardBenefitRepository.saveCardBenefitMonth(db, previous, [
+      { methodId: first.id, amount: 0 },
+      { methodId: second.id, amount: 1500 },
+    ]);
+    await cardBenefitRepository.saveCardBenefitMonth(db, previous, [
+      { methodId: first.id, amount: 100 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    assert.equal(
+      cardBenefitDomain.cardBenefitMonthSummary(
+        await cardBenefitRepository.loadCardBenefitMonth(db, previous),
+      ).total,
+      10100,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("new cards start this month, bank deletion keeps card benefits, and invalid or failed changes roll back card settings and history", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveMethod(db, bankInput);
+    const bank = (await repository.readMethods(db))[0];
+    const input = {
+      ...cardBenefitDefaults,
+      kind: "card",
+      providerCode: "card_samsung",
+      name: "new card",
+      bankId: bank.id,
+      cardTypeCode: "credit",
+      settlementDay: 25,
+      benefitAmount: 5000,
+    };
+    await repository.saveMethod(db, input);
+    const card = (await repository.readMethods(db)).find(
+      (method) => method.kind === "card",
+    );
+    const now = ledgerDomain.monthKey();
+    assert.deepEqual(
+      (
+        await cardBenefitRepository.loadCardBenefitMonth(
+          db,
+          ledgerDomain.moveMonth(now, -1),
+        )
+      ).cards,
+      [],
+    );
+    assert.equal(
+      (await cardBenefitRepository.loadCardBenefitMonth(db, now)).cards[0]
+        .expectedAmount,
+      5000,
+    );
+    const methods = await repository.readMethods(db);
+    const history = await db.getAllAsync(
+      "SELECT * FROM card_benefit_versions ORDER BY methodId, effectiveMonth",
+    );
+    for (const month of ["2026-13", "nope", ledgerDomain.moveMonth(now, -1)])
+      await assert.rejects(
+        repository.saveMethod(
+          db,
+          { ...input, benefitAmount: 9000 },
+          card.id,
+          month,
+        ),
+      );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    const run = db.runAsync;
+    db.runAsync = async (sql, ...params) => {
+      const result = await run(sql, ...params);
+      if (sql.includes("INSERT INTO card_benefit_versions"))
+        throw new Error("Simulated benefit history failure");
+      return result;
+    };
+    await assert.rejects(
+      repository.saveMethod(db, { ...input, benefitAmount: 9000 }, card.id),
+      /Simulated benefit history failure/,
+    );
+    await assert.rejects(
+      repository.deleteMethod(db, card.id),
+      /Simulated benefit history failure/,
+    );
+    db.runAsync = run;
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(
+      await db.getAllAsync(
+        "SELECT * FROM card_benefit_versions ORDER BY methodId, effectiveMonth",
+      ),
+      history,
+    );
+    await repository.deleteMethod(db, bank.id);
+    assert.equal(
+      (await cardBenefitRepository.loadCardBenefitMonth(db, now)).cards[0]
+        .expectedAmount,
+      5000,
+    );
+    assert.equal((await repository.readMethods(db))[0].bankId, null);
+    await assert.rejects(
+      db.runAsync("UPDATE card_benefit_versions SET expectedAmount = -1"),
+      /constraint/,
+    );
+    await assert.rejects(
+      db.runAsync("UPDATE card_benefit_versions SET benefitTypeCode = NULL"),
+      /constraint/,
+    );
+    await assert.rejects(
+      db.runAsync(
+        "UPDATE card_benefit_versions SET effectiveMonth = '2026-13'",
+      ),
+      /constraint/,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("v14 benefit history migration preserves confirmations and unvisited estimates, rolls back and remains stable across reopening", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "month-pin-benefit-history-"));
+  const path = join(directory, "month-pin.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second } = await seedSettlementCards(db);
+    const now = ledgerDomain.monthKey();
+    const before = ledgerDomain.moveMonth(now, -2);
+    await cardBenefitRepository.saveCardBenefitMonth(db, before, [
+      { methodId: first.id, amount: 0 },
+      { methodId: second.id, amount: 700 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      before,
+    );
+    const methods = await repository.readMethods(db);
+    await db.execAsync(
+      "DROP TABLE card_benefit_versions; PRAGMA user_version = 14;",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 15;")
+        throw new Error("Simulated history migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /Simulated history migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      14,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'card_benefit_versions'",
+      ),
+      undefined,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      15,
+    );
+    assert.deepEqual(await repository.readMethods(db), methods);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, before),
+      confirmed,
+    );
+    const unvisited = ledgerDomain.moveMonth(now, -4);
+    assert.equal(
+      cardBenefitDomain.cardBenefitMonthSummary(
+        await cardBenefitRepository.loadCardBenefitMonth(db, unvisited),
+      ).total,
+      18000,
+    );
+    await repository.deleteMethod(db, first.id);
+    const retained = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      unvisited,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, before),
+      confirmed,
+    );
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, unvisited),
+      retained,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("card edits expose the same effective-month picker as expenses and submit the selected month", async () => {
+  const now = ledgerDomain.monthKey();
+  const calls = [];
+  const method = {
+    ...cardBenefitDefaults,
+    id: 8,
+    provider: "삼성카드",
+    providerCode: "card_samsung",
+    kind: "card",
+    name: "card",
+    bankId: 1,
+    cardTypeCode: "credit",
+    settlementDay: 25,
+    benefitAmount: 5000,
+  };
+  const fixture = methodFormFixture({
+    method,
+    methods: [{ ...bankInput, id: 1, provider: "국민은행" }],
+    saveMethod: async (input, id, effectiveMonth) =>
+      calls.push({ input, id, effectiveMonth }),
+  });
+  assert.equal(fixture.component("MonthField"), undefined);
+  fixture.control("월 고정 혜택 (원)").onChangeText("9000");
+  assert.equal(fixture.control("변경 적용 월").minimumMonth, now);
+  const next = ledgerDomain.moveMonth(now, 1);
+  fixture.control("변경 적용 월").onChange(next);
+  fixture.control("저장").onPress();
+  await settle();
+  assert.equal(calls[0].id, 8);
+  assert.equal(calls[0].effectiveMonth, next);
+  assert.equal(calls[0].input.benefitAmount, 9000);
+});
+
+test("entered variable expense amounts remain editable, including a previously entered zero", async () => {
+  const native = {
+    Pressable: "Pressable",
+    View: "View",
+    StyleSheet: { create: (value) => value },
+  };
+  let opened = 0;
+  const runtime = hookRuntime("src/components/ledger-entry-row.tsx", {
+    "react-native": native,
+    "./typography": { AppText: "Text" },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "../data/method-types": loadTypeScript("src/data/method-types.ts"),
+    "../data/expense-types": loadTypeScript("src/data/expense-types.ts"),
+    "../utils/expenses": domain,
+    "./provider-icon": { ProviderIcon: "ProviderIcon" },
+    "./ui": { colors: {} },
+  });
+  const row = runtime.render(({ LedgerEntryRow }) =>
+    LedgerEntryRow({
+      entry: {
+        id: 1,
+        name: "variable",
+        amountTypeCode: "variable",
+        amount: 0,
+        amountEntered: true,
+        methodKind: null,
+      },
+      disabled: false,
+      onPress: () => opened++,
+    }),
+  );
+  assert.equal(row.type, "Pressable");
+  assert.equal(row.props.disabled, false);
+  row.props.onPress();
+  assert.equal(opened, 1);
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      amountTypeCode: "variable",
+      amount: null,
+    });
+    const entry = (
+      await ledgerRepository.loadLedgerMonth(db, ledgerDomain.monthKey())
+    )[0];
+    await ledgerRepository.saveLedgerAmount(db, entry.id, 0);
+    await ledgerRepository.saveLedgerAmount(db, entry.id, 12345);
+    assert.equal(
+      (await ledgerRepository.readLedgerMonth(db, entry.month))[0].amount,
+      12345,
+    );
+    assert.equal(
+      (await ledgerRepository.readLedgerMonth(db, entry.month))[0]
+        .amountEntered,
+      true,
+    );
   } finally {
     db.sqlite.close();
   }

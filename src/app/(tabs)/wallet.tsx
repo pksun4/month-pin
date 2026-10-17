@@ -7,17 +7,21 @@ import type { MethodKind, PaymentMethod } from "../../data/models";
 import {
   METHOD_KINDS,
   METHOD_SORT_OPTIONS,
+  getCardType,
   type MethodSortCode,
 } from "../../data/method-types";
 import { useMonthPin } from "../../hooks/use-month-pin";
 import {
   methodLabel,
   cardTypeLabel,
+  cardBenefitLabel,
   money,
   monthlyTotal,
   paymentMethodsTotal,
   relatedExpenses,
   sortPaymentMethods,
+  groupCardMethods,
+  mergePaymentMethodOrder,
 } from "../../utils/expenses";
 import { ExpenseRow } from "../../components/expense-row";
 import { MethodForm } from "../../components/method-form";
@@ -63,7 +67,22 @@ export default function WalletScreen() {
     () => sortPaymentMethods(visible, sortCode, methods, expenses),
     [visible, sortCode, methods, expenses],
   );
-  const displayed = pendingOrder ?? sortedMethods;
+  const ordered = pendingOrder ?? sortedMethods;
+  const sections = useMemo(
+    () => (kind === "card" ? groupCardMethods(ordered) : undefined),
+    [kind, ordered],
+  );
+  const displayed = useMemo(
+    () => sections?.flatMap((section) => section.data) ?? ordered,
+    [sections, ordered],
+  );
+  const canReorder = sections
+    ? sections.some((section) => section.data.length > 1)
+    : visible.length > 1;
+  const cardsToReview =
+    kind === "card"
+      ? visible.filter((method) => !getCardType(method.cardTypeCode))
+      : [];
   const locked = busy || dragging || savingOrder;
   const kindLabel = METHOD_KINDS.find((option) => option.code === kind)?.label;
   const summaryTotal = useMemo(
@@ -102,7 +121,7 @@ export default function WalletScreen() {
     try {
       await reorderMethods(
         kind,
-        next.map((method) => method.id),
+        mergePaymentMethodOrder(visible, next).map((method) => method.id),
       );
     } catch {
       Alert.alert("순서 변경 실패", "저장하지 못했어요. 다시 시도해 주세요.");
@@ -116,16 +135,30 @@ export default function WalletScreen() {
   function moveForAccessibility(index: number, direction: -1 | 1) {
     if (locked) return;
     const target = index + direction;
-    if (target < 0 || target >= displayed.length) return;
+    if (!canMoveTo(index, target)) return;
     const next = [...displayed];
     [next[index], next[target]] = [next[target], next[index]];
     void saveOrder(next);
   }
 
+  function canMoveTo(index: number, target: number) {
+    if (
+      index < 0 ||
+      index >= displayed.length ||
+      target < 0 ||
+      target >= displayed.length
+    )
+      return false;
+    return (
+      kind === "bank" ||
+      displayed[index].cardTypeCode === displayed[target].cardTypeCode
+    );
+  }
+
   function remove(method: PaymentMethod) {
     Alert.alert(
       "결제수단 삭제",
-      `${method.name}을 삭제할까요? 연결된 고정비는 유지되고, 결제수단 또는 출금 통장이 미지정으로 바뀌어요.`,
+      `${method.name}을 삭제할까요? 연결된 고정비는 유지되고, 결제수단 또는 출금 통장이 미지정으로 바뀌어요.${method.kind === "card" ? " 카드 예상 혜택은 이번 달까지 유지하고 다음 달부터 제외해요. 이미 확정한 혜택은 유지돼요." : ""}`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -150,6 +183,12 @@ export default function WalletScreen() {
           key={kind}
           reordering={reordering}
           data={displayed}
+          sections={sections}
+          renderSectionHeader={(section) => (
+            <Text accessibilityRole="header" style={s.sectionTitle}>
+              {section.title} · {section.data.length}개
+            </Text>
+          )}
           keyExtractor={(method) => `method-${method.id}`}
           containerStyle={s.flex}
           contentContainerStyle={[s.page, listStyles.page]}
@@ -177,10 +216,14 @@ export default function WalletScreen() {
                       onDrag: () => {
                         if (!locked && !savingOrderRef.current) drag();
                       },
-                      canMoveUp: (getIndex() ?? 0) > 0,
-                      canMoveDown:
-                        (getIndex() ?? displayed.length - 1) <
-                        displayed.length - 1,
+                      canMoveUp: canMoveTo(
+                        getIndex() ?? -1,
+                        (getIndex() ?? -1) - 1,
+                      ),
+                      canMoveDown: canMoveTo(
+                        getIndex() ?? -1,
+                        (getIndex() ?? -1) + 1,
+                      ),
                       onAccessibilityMove: (direction) => {
                         const index = getIndex();
                         if (index !== undefined)
@@ -219,13 +262,29 @@ export default function WalletScreen() {
                 countLabel={`${kindLabel} ${visible.length}개`}
                 amount={summaryTotal}
               />
+              {cardsToReview.length > 0 && (
+                <View style={s.card}>
+                  <Text style={s.body}>
+                    종류 선택이 필요한 기존 카드가 {cardsToReview.length}개
+                    있어요.
+                  </Text>
+                  <Button
+                    label="카드 정보 확인"
+                    secondary
+                    disabled={locked || reordering}
+                    onPress={() => setSelected(cardsToReview[0])}
+                  />
+                </View>
+              )}
               {visible.length > 0 && (
                 <ListToolbar
                   hint={
                     reordering
                       ? savingOrder
                         ? "순서를 저장하고 있어요…"
-                        : "손잡이를 잡고 이동하세요."
+                        : kind === "card"
+                          ? "같은 카드 종류 안에서 이동하세요."
+                          : "손잡이를 잡고 이동하세요."
                       : undefined
                   }
                 >
@@ -239,7 +298,7 @@ export default function WalletScreen() {
                       alignment="end"
                     />
                   )}
-                  {(visible.length > 1 || reordering) && (
+                  {(canReorder || reordering) && (
                     <ListReorderButton
                       active={reordering}
                       disabled={locked}
@@ -254,22 +313,24 @@ export default function WalletScreen() {
             </View>
           }
           ListEmptyComponent={
-            <Empty
-              icon={kind === "bank" ? "business-outline" : "card-outline"}
-              title={`등록된 ${kind === "bank" ? "통장이" : "카드가"} 없어요`}
-              description={
-                kind === "bank"
-                  ? "은행을 선택하고 별명을 입력해 통장을 등록해 주세요."
-                  : "카드사를 선택하고 카드 이름을 입력해 등록해 주세요."
-              }
-              action={
-                <Button
-                  label={kind === "bank" ? "통장 등록" : "카드 등록"}
-                  disabled={locked}
-                  onPress={() => setForm({})}
-                />
-              }
-            />
+            visible.length === 0 ? (
+              <Empty
+                icon={kind === "bank" ? "business-outline" : "card-outline"}
+                title={`등록된 ${kind === "bank" ? "통장이" : "카드가"} 없어요`}
+                description={
+                  kind === "bank"
+                    ? "은행을 선택하고 별명을 입력해 통장을 등록해 주세요."
+                    : "카드사를 선택하고 카드 이름을 입력해 등록해 주세요."
+                }
+                action={
+                  <Button
+                    label={kind === "bank" ? "통장 등록" : "카드 등록"}
+                    disabled={locked}
+                    onPress={() => setForm({})}
+                  />
+                }
+              />
+            ) : null
           }
           ListFooterComponent={
             <View style={listStyles.footer}>
@@ -346,6 +407,22 @@ export default function WalletScreen() {
                     </>
                   )}
                 </View>
+                {selected.kind === "card" && (
+                  <View style={s.card}>
+                    <Text style={s.sectionTitle}>월 카드 혜택</Text>
+                    <Text style={s.body}>
+                      {cardBenefitLabel(selected) ?? "혜택 미등록"}
+                    </Text>
+                    <Text style={s.caption}>
+                      {selected.benefitTypeCode === "variable"
+                        ? "입력한 예상 금액이며 실제 혜택은 달라질 수 있어요."
+                        : selected.benefitTypeCode === "fixed"
+                          ? "매월 고정적으로 받는 혜택으로 등록한 금액이에요."
+                          : "카드 수정에서 고정·변동 유형과 금액을 입력할 수 있어요."}{" "}
+                      고정비 합계에서 차감하지 않아요.
+                    </Text>
+                  </View>
+                )}
                 {linkedCards.length > 0 && (
                   <View style={s.card}>
                     <Text style={s.sectionTitle}>이 통장에 연결된 카드</Text>

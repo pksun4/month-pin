@@ -1,5 +1,10 @@
 import type { Expense, PaymentMethod } from "../data/models";
-import { getCardType, type MethodSortCode } from "../data/method-types";
+import {
+  getCardBenefitType,
+  getCardType,
+  CARD_TYPES,
+  type MethodSortCode,
+} from "../data/method-types";
 import { getProvider } from "../data/providers";
 import type {
   ExpenseCategoryFilterCode,
@@ -17,6 +22,12 @@ export const methodLabel = (method?: PaymentMethod) =>
   method ? `${method.provider} · ${method.name}` : "결제수단 미지정";
 export const cardTypeLabel = (method: PaymentMethod) =>
   getCardType(method.cardTypeCode)?.label ?? "종류 미지정";
+export function cardBenefitLabel(method: PaymentMethod): string | null {
+  const type = getCardBenefitType(method.benefitTypeCode);
+  if (method.kind !== "card" || !type || method.benefitAmount == null)
+    return null;
+  return `월 ${type.label} 혜택 ${method.benefitTypeCode === "variable" ? "예상 " : ""}${money(method.benefitAmount)}`;
+}
 export function cardWithdrawalLabel(
   method: PaymentMethod,
   bank?: PaymentMethod,
@@ -79,6 +90,28 @@ export function paymentMethodsByKind(
     ...methods.filter((method) => method.kind === "bank"),
     ...methods.filter((method) => method.kind === "card"),
   ];
+}
+
+export function groupCardMethods(methods: readonly PaymentMethod[]) {
+  return CARD_TYPES.flatMap((type) => {
+    const data = methods.filter(
+      (method) =>
+        method.kind === "card" &&
+        (getCardType(method.cardTypeCode)?.code ?? null) === type.code,
+    );
+    return data.length ? [{ key: type.code, title: type.label, data }] : [];
+  });
+}
+
+export function mergePaymentMethodOrder(
+  current: readonly PaymentMethod[],
+  ordered: readonly PaymentMethod[],
+) {
+  const ids = new Set(ordered.map((method) => method.id));
+  let index = 0;
+  return [...current]
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+    .map((method) => (ids.has(method.id) ? ordered[index++] : method));
 }
 
 function providerSortName(method: PaymentMethod): string {
@@ -145,11 +178,13 @@ export function mergeExpenseOrder(
   );
 }
 
-export function parseAmount(value: string): number | null {
+export function parseAmount(value: string, minimum: 0 | 1 = 1): number | null {
   const normalized = value.replace(/,/g, "").trim();
   if (!/^\d+$/.test(normalized)) return null;
   const amount = Number(normalized);
-  return Number.isSafeInteger(amount) && amount > 0 && amount <= 999_999_999
+  return Number.isSafeInteger(amount) &&
+    amount >= minimum &&
+    amount <= 999_999_999
     ? amount
     : null;
 }

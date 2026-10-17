@@ -4,6 +4,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import type { PaymentMethod } from "../data/models";
 import {
   cardTypeLabel,
+  cardBenefitLabel,
   cardWithdrawalLabel,
   methodLabel,
   money,
@@ -26,6 +27,7 @@ export function PaymentMethodRow({
   reorder?: ReorderControls;
 }) {
   const withdrawal = cardWithdrawalLabel(method, bank);
+  const benefit = cardBenefitLabel(method);
   const providerLabel =
     method.kind === "card"
       ? `${method.provider} · ${cardTypeLabel(method)}`
@@ -34,7 +36,7 @@ export function PaymentMethodRow({
     <View style={[styles.card, reorder?.active && styles.active]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${methodLabel(method)}, 고정 금액 합계 ${money(total)}${method.kind === "card" ? `, ${cardTypeLabel(method)}, ${withdrawal}` : ""}, 상세보기`}
+        accessibilityLabel={`${methodLabel(method)}, 고정 금액 합계 ${money(total)}${method.kind === "card" ? `, ${cardTypeLabel(method)}, ${withdrawal}` : ""}${benefit ? `, ${benefit}` : ""}, 상세보기`}
         disabled={Boolean(reorder)}
         accessible={!reorder}
         onPress={onPress}
@@ -72,8 +74,9 @@ export function PaymentMethodRow({
             {withdrawal}
           </Text>
         )}
+        {benefit && <Text style={styles.benefit}>{benefit}</Text>}
       </Pressable>
-      {reorder && (
+      {reorder && (reorder.canMoveUp || reorder.canMoveDown) && (
         <ReorderHandle label={methodLabel(method)} reorder={reorder} />
       )}
     </View>
@@ -103,6 +106,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   withdrawal: { fontSize: 12, lineHeight: 18, color: colors.muted },
+  benefit: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.blue,
+    fontWeight: "600",
+  },
   active: {
     shadowColor: colors.ink,
     shadowOpacity: 0.12,

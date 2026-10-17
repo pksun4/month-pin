@@ -13,14 +13,26 @@ import {
   EXPENSE_STATUS_OPTIONS,
   type ExpenseStatusCode,
 } from "./expense-types";
-import { CARD_TYPES, getCardType } from "./method-types";
+import {
+  CARD_TYPES,
+  CARD_BENEFIT_TYPES,
+  getCardType,
+  getCardBenefitType,
+} from "./method-types";
 import { LEDGER_SCHEMA } from "./ledger";
+import { CARD_BENEFIT_SCHEMA } from "./card-benefits";
+import {
+  CARD_BENEFIT_HISTORY_SCHEMA,
+  seedCardBenefitHistory,
+  applyCardBenefitChange,
+  updateCardBenefitMetadata,
+} from "./card-benefit-history";
 import {
   AMOUNT_HISTORY_SCHEMA,
   applyAmountChange,
   seedAmountHistory,
 } from "./expense-amount-history";
-import { monthKey, isValidMonth } from "../utils/ledger";
+import { monthKey, isValidMonth, moveMonth } from "../utils/ledger";
 
 const START_MONTH_COLUMN =
   "startMonth TEXT NOT NULL DEFAULT '1000-01' CHECK (startMonth GLOB '[1-9][0-9][0-9][0-9]-[0-1][0-9]' AND CAST(substr(startMonth, 6, 2) AS INTEGER) BETWEEN 1 AND 12)";
@@ -38,6 +50,15 @@ const CARD_TYPE_COLUMN = `cardTypeCode TEXT CHECK (
   AND (cardTypeCode IS NULL OR cardTypeCode != 'debit' OR settlementDay IS NULL)
 )`;
 
+const BENEFIT_TYPE_COLUMN = `benefitTypeCode TEXT CHECK (
+  benefitTypeCode IS NULL OR (kind = 'card' AND benefitTypeCode IN (${CARD_BENEFIT_TYPES.map((type) => `'${type.code}'`).join(", ")}))
+)`;
+const BENEFIT_AMOUNT_COLUMN = `benefitAmount INTEGER CHECK (
+  (benefitTypeCode IS NULL AND benefitAmount IS NULL) OR
+  (kind = 'card' AND benefitTypeCode IS NOT NULL AND benefitAmount IS NOT NULL
+    AND typeof(benefitAmount) = 'integer' AND benefitAmount BETWEEN 0 AND 999999999)
+)`;
+
 const PROVIDER_SCHEMA = `
   CREATE TABLE IF NOT EXISTS payment_providers (
     code TEXT PRIMARY KEY NOT NULL,
@@ -50,6 +71,7 @@ const PROVIDER_SCHEMA = `
 function methodSchema(
   table: "payment_methods" | "payment_methods_v2",
   ordered = true,
+  benefits = false,
 ) {
   return `CREATE TABLE IF NOT EXISTS ${table} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +83,7 @@ function methodSchema(
     settlementDay INTEGER CHECK (settlementDay BETWEEN 1 AND 31),
     ${ordered ? `${CARD_TYPE_COLUMN},` : ""}
     ${ordered ? "sortOrder INTEGER NOT NULL DEFAULT 0 CHECK (sortOrder >= 0)," : ""}
+    ${benefits ? `${BENEFIT_TYPE_COLUMN}, ${BENEFIT_AMOUNT_COLUMN},` : ""}
     FOREIGN KEY (providerCode, kind) REFERENCES payment_providers(code, kind),
     CHECK (providerCode IS NOT NULL OR
       (legacyProvider IS NOT NULL AND length(trim(legacyProvider)) BETWEEN 1 AND 40)),
@@ -85,14 +108,16 @@ function expenseSchema(table: "expenses" | "expenses_v4", current = true) {
 
 export const SCHEMA = `
   ${PROVIDER_SCHEMA}
-  ${methodSchema("payment_methods")}
+  ${methodSchema("payment_methods", true, true)}
   ${expenseSchema("expenses")}
   CREATE INDEX IF NOT EXISTS expenses_method_idx ON expenses(methodId);
   CREATE INDEX IF NOT EXISTS methods_order_idx ON payment_methods(kind, sortOrder, id);
   CREATE INDEX IF NOT EXISTS expenses_order_idx ON expenses(sortOrder, id);
   ${LEDGER_SCHEMA}
   ${AMOUNT_HISTORY_SCHEMA}
-  PRAGMA user_version = 12;
+  ${CARD_BENEFIT_SCHEMA}
+  ${CARD_BENEFIT_HISTORY_SCHEMA}
+  PRAGMA user_version = 15;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -218,7 +243,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 12)
+  if ((version?.user_version ?? 0) > 15)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -368,6 +393,35 @@ export async function initializeDatabase(db: SQLiteDatabase) {
         await db.execAsync("PRAGMA user_version = 12;");
       });
     }
+    if (version.user_version <= 12) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(payment_methods)",
+        );
+        if (!columns.some((column) => column.name === "benefitTypeCode"))
+          await db.execAsync(
+            `ALTER TABLE payment_methods ADD COLUMN ${BENEFIT_TYPE_COLUMN};`,
+          );
+        if (!columns.some((column) => column.name === "benefitAmount"))
+          await db.execAsync(
+            `ALTER TABLE payment_methods ADD COLUMN ${BENEFIT_AMOUNT_COLUMN};`,
+          );
+        await db.execAsync("PRAGMA user_version = 13;");
+      });
+    }
+    if (version.user_version <= 13) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(CARD_BENEFIT_SCHEMA);
+        await db.execAsync("PRAGMA user_version = 14;");
+      });
+    }
+    if (version.user_version <= 14) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(CARD_BENEFIT_HISTORY_SCHEMA);
+        await seedCardBenefitHistory(db);
+        await db.execAsync("PRAGMA user_version = 15;");
+      });
+    }
     await db.withTransactionAsync(() => syncProviders(db));
   }
 }
@@ -402,7 +456,8 @@ export function readMethods(db: SQLiteDatabase) {
   return db.getAllAsync<PaymentMethod>(
     `SELECT m.id, m.kind, m.providerCode,
       COALESCE(p.name, m.legacyProvider) AS provider,
-      m.name, m.bankId, m.settlementDay, m.cardTypeCode, m.sortOrder
+      m.name, m.bankId, m.settlementDay, m.cardTypeCode, m.sortOrder,
+      m.benefitTypeCode, m.benefitAmount
      FROM payment_methods m
      LEFT JOIN payment_providers p ON p.code = m.providerCode AND p.kind = m.kind
      ORDER BY m.sortOrder, m.id DESC`,
@@ -505,10 +560,21 @@ export async function saveMethod(
   db: SQLiteDatabase,
   input: MethodInput,
   id?: number,
+  effectiveMonth?: string,
 ) {
   const provider = getProvider(input.providerCode);
   if (!provider || provider.kind !== input.kind)
     throw new Error("목록에서 은행 또는 카드사를 선택해 주세요.");
+  if (
+    typeof input.name !== "string" ||
+    !input.name.trim() ||
+    input.name.trim().length > 40
+  )
+    throw new Error(
+      input.kind === "card"
+        ? "카드 이름은 1~40자로 입력해 주세요."
+        : "통장 별명은 1~40자로 입력해 주세요.",
+    );
   const cardTypeCode = input.cardTypeCode ?? null;
   if (input.kind === "card" && !getCardType(cardTypeCode))
     throw new Error("신용카드 또는 체크카드를 선택해 주세요.");
@@ -516,46 +582,115 @@ export async function saveMethod(
     throw new Error("통장에는 카드 종류를 저장하지 않아요.");
   if (cardTypeCode === "debit" && input.settlementDay !== null)
     throw new Error("체크카드에는 대금 출금일을 저장하지 않아요.");
-  if (id !== undefined) {
-    const existing = await db.getFirstAsync<{ kind: MethodKind }>(
-      "SELECT kind FROM payment_methods WHERE id = ?",
-      id,
-    );
-    if (!existing || existing.kind !== input.kind)
+  if (
+    cardTypeCode === "credit" &&
+    (!Number.isInteger(input.settlementDay) ||
+      input.settlementDay === null ||
+      input.settlementDay < 1 ||
+      input.settlementDay > 31)
+  )
+    throw new Error("출금일은 1일부터 31일까지 입력해 주세요.");
+  const benefitTypeCode = input.benefitTypeCode ?? null;
+  const benefitAmount = input.benefitAmount ?? null;
+  if (
+    input.kind === "bank" &&
+    (benefitTypeCode !== null || benefitAmount !== null)
+  )
+    throw new Error("통장에는 카드 혜택을 저장하지 않아요.");
+  if (
+    (input.kind === "card" &&
+      (benefitTypeCode === null || benefitAmount === null)) ||
+    (benefitTypeCode === null && benefitAmount !== null) ||
+    (benefitTypeCode !== null &&
+      (!getCardBenefitType(benefitTypeCode) ||
+        benefitAmount === null ||
+        !Number.isSafeInteger(benefitAmount) ||
+        benefitAmount < 0 ||
+        benefitAmount > 999999999))
+  )
+    throw new Error("월 혜택 유형과 금액을 확인해 주세요.");
+  if (
+    input.kind === "card" &&
+    (input.bankId === null ||
+      !Number.isSafeInteger(input.bankId) ||
+      input.bankId < 1)
+  )
+    throw new Error("카드에 연결할 통장을 선택해 주세요.");
+  await db.withTransactionAsync(async () => {
+    const existing =
+      id === undefined
+        ? null
+        : await db.getFirstAsync<PaymentMethod>(
+            "SELECT * FROM payment_methods WHERE id = ?",
+            id,
+          );
+    if (id !== undefined && (!existing || existing.kind !== input.kind))
       throw new Error("수정할 결제수단을 다시 확인해 주세요.");
-  }
-  if (input.bankId !== null) {
-    const bank = await db.getFirstAsync<PaymentMethod>(
-      "SELECT * FROM payment_methods WHERE id = ? AND kind = ?",
-      input.bankId,
-      "bank",
-    );
-    if (!bank) throw new Error("출금 통장을 다시 선택해 주세요.");
-  }
-  if (id !== undefined) {
-    await db.runAsync(
-      "UPDATE payment_methods SET providerCode = ?, legacyProvider = NULL, name = ?, bankId = ?, settlementDay = ?, cardTypeCode = ? WHERE id = ?",
-      input.providerCode,
-      input.name,
-      input.bankId,
-      input.settlementDay,
-      cardTypeCode,
-      id,
-    );
-  } else {
-    await db.runAsync(
-      `INSERT INTO payment_methods (kind, providerCode, name, bankId, settlementDay, cardTypeCode, sortOrder)
-       SELECT ?, ?, ?, ?, ?, ?, COALESCE(MAX(sortOrder), -1) + 1
-       FROM payment_methods WHERE kind = ?`,
-      input.kind,
-      input.providerCode,
-      input.name,
-      input.bankId,
-      input.settlementDay,
-      cardTypeCode,
-      input.kind,
-    );
-  }
+    if (input.bankId !== null) {
+      const bank = await db.getFirstAsync<PaymentMethod>(
+        "SELECT * FROM payment_methods WHERE id = ? AND kind = ?",
+        input.bankId,
+        "bank",
+      );
+      if (!bank) throw new Error("출금 통장을 다시 선택해 주세요.");
+    }
+    await seedCardBenefitHistory(db);
+    let methodId = id;
+    if (id !== undefined) {
+      await db.runAsync(
+        "UPDATE payment_methods SET providerCode = ?, legacyProvider = NULL, name = ?, bankId = ?, settlementDay = ?, cardTypeCode = ?, benefitTypeCode = ?, benefitAmount = ? WHERE id = ?",
+        input.providerCode,
+        input.name,
+        input.bankId,
+        input.settlementDay,
+        cardTypeCode,
+        benefitTypeCode,
+        benefitAmount,
+        id,
+      );
+    } else {
+      const result = await db.runAsync(
+        `INSERT INTO payment_methods (kind, providerCode, name, bankId, settlementDay, cardTypeCode, benefitTypeCode, benefitAmount, sortOrder)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(MAX(sortOrder), -1) + 1
+         FROM payment_methods WHERE kind = ?`,
+        input.kind,
+        input.providerCode,
+        input.name,
+        input.bankId,
+        input.settlementDay,
+        cardTypeCode,
+        benefitTypeCode,
+        benefitAmount,
+        input.kind,
+      );
+      methodId = result.lastInsertRowId;
+    }
+    if (input.kind === "card") {
+      const setting = {
+        name: input.name,
+        providerCode: input.providerCode,
+        providerName: provider.name,
+        benefitTypeCode,
+        expectedAmount: benefitAmount,
+      };
+      const benefitChanged =
+        !existing ||
+        existing.benefitTypeCode !== benefitTypeCode ||
+        existing.benefitAmount !== benefitAmount;
+      if (benefitChanged)
+        await applyCardBenefitChange(
+          db,
+          methodId!,
+          setting,
+          existing ? (effectiveMonth ?? monthKey()) : monthKey(),
+        );
+      else if (
+        existing.name !== input.name ||
+        existing.providerCode !== input.providerCode
+      )
+        await updateCardBenefitMetadata(db, methodId!, setting);
+    }
+  });
 }
 
 export async function reorderMethods(
@@ -670,5 +805,32 @@ export async function reorderExpenses(
 }
 
 export async function deleteMethod(db: SQLiteDatabase, id: number) {
-  await db.runAsync("DELETE FROM payment_methods WHERE id = ?", id);
+  if (!Number.isSafeInteger(id) || id < 1)
+    throw new Error("삭제할 결제수단을 다시 확인해 주세요.");
+  await db.withTransactionAsync(async () => {
+    const existing = await db.getFirstAsync<
+      PaymentMethod & { providerName: string }
+    >(
+      `SELECT m.*, COALESCE(p.name, m.legacyProvider) AS providerName FROM payment_methods m
+       LEFT JOIN payment_providers p ON p.code = m.providerCode WHERE m.id = ?`,
+      id,
+    );
+    if (!existing) throw new Error("삭제할 결제수단을 다시 확인해 주세요.");
+    await seedCardBenefitHistory(db);
+    if (existing.kind === "card") {
+      await applyCardBenefitChange(
+        db,
+        id,
+        {
+          name: existing.name,
+          providerCode: existing.providerCode,
+          providerName: existing.providerName,
+          benefitTypeCode: null,
+          expectedAmount: null,
+        },
+        moveMonth(monthKey(), 1),
+      );
+    }
+    await db.runAsync("DELETE FROM payment_methods WHERE id = ?", id);
+  });
 }

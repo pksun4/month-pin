@@ -1,0 +1,3 @@
+interface:
+  display_name: "몬스핀 저장 데이터 변경"
+  short_description: "저장 구조 변경의 영향을 확인하고 기존 데이터 이전과 참조 보존을 검증합니다"

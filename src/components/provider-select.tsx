@@ -6,17 +6,27 @@ import {
 } from "../data/providers";
 import { FormSelect } from "./form-select";
 import { ProviderIcon } from "./provider-icon";
+import type { Ref } from "react";
+import type { View } from "react-native";
 
 export function ProviderSelect({
   kind,
   value,
   onChange,
   disabled = false,
+  required,
+  error,
+  onBlur,
+  controlRef,
 }: {
   kind: MethodKind;
   value: ProviderCode | null;
   onChange: (value: ProviderCode) => void;
   disabled?: boolean;
+  required?: boolean;
+  error?: string;
+  onBlur?: () => void;
+  controlRef?: Ref<View>;
 }) {
   const providers = kind === "bank" ? BANK_PROVIDERS : CARD_PROVIDERS;
   return (
@@ -32,6 +42,10 @@ export function ProviderSelect({
       inlineLabel
       onChange={onChange}
       disabled={disabled}
+      required={required}
+      error={error}
+      onBlur={onBlur}
+      controlRef={controlRef}
     />
   );
 }

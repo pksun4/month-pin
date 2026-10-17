@@ -1,57 +1,64 @@
 import { AppText as Text, AppTextInput as TextInput } from "./typography";
-import { useState } from "react";
+import { useState, type Ref } from "react";
+import type { TextInput as NativeTextInput } from "react-native";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { parseDay } from "../utils/expenses";
-import { colors, s } from "./ui";
+import { colors, s, FieldLabel, FieldMessage } from "./ui";
 
 export function ChargeDayField({
   value,
   onChange,
   disabled,
   label = "결제일",
-  optional = false,
+  required,
+  error,
+  onBlur,
+  controlRef,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
   label?: string;
-  optional?: boolean;
+  required?: boolean;
+  error?: string;
+  onBlur?: () => void;
+  controlRef?: Ref<NativeTextInput>;
 }) {
   const [focused, setFocused] = useState(false);
   const [touched, setTouched] = useState(false);
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > 1.4;
-  const invalid =
-    (value.length > 0 || (touched && !optional)) && parseDay(value) === null;
+  const message =
+    error ??
+    ((value.length > 0 || touched) && parseDay(value) === null
+      ? `${label}은 1~31일로 입력해 주세요.`
+      : "");
   return (
     <View style={s.field}>
       <View style={[styles.row, stacked && styles.stacked]}>
-        <Text
+        <FieldLabel
+          label={label}
+          required={required}
           style={[
             s.fieldLabel,
             styles.label,
             !stacked && { width: 68 * fontScale },
           ]}
-        >
-          {label}
-        </Text>
+        />
         <View style={styles.controls}>
           <View
             style={[
               s.compactInput,
               { width: 88 * fontScale },
               focused && styles.focused,
-              invalid && styles.invalid,
+              !!message && s.invalidInput,
               disabled && styles.dimmed,
             ]}
           >
             <TextInput
+              ref={controlRef}
               accessibilityLabel={`매월 ${label}`}
-              accessibilityHint={
-                optional
-                  ? "선택 입력이에요. 입력한다면 1일부터 31일까지 입력해 주세요."
-                  : "1일부터 31일까지 입력해 주세요."
-              }
+              accessibilityHint={message || "1일부터 31일까지 입력해 주세요."}
               accessibilityState={{ disabled }}
               value={value}
               onChangeText={(text) => onChange(text.replace(/\D/g, ""))}
@@ -70,22 +77,17 @@ export function ChargeDayField({
               onBlur={() => {
                 setFocused(false);
                 setTouched(true);
+                onBlur?.();
               }}
             />
             <View style={[styles.unitSlot, { height: 26 * fontScale }]}>
               <Text style={styles.unit}>일</Text>
             </View>
           </View>
-          <Text style={styles.hint}>
-            {optional ? "1~31일 · 선택" : "매월 · 1~31일"}
-          </Text>
+          <Text style={styles.hint}>매월 · 1~31일</Text>
         </View>
       </View>
-      {invalid && (
-        <Text accessibilityRole="alert" style={styles.error}>
-          {label}은 1일부터 31일까지 입력해 주세요.
-        </Text>
-      )}
+      <FieldMessage error={message} />
     </View>
   );
 }
@@ -118,7 +120,5 @@ const styles = StyleSheet.create({
   },
   hint: { flexShrink: 1, color: colors.muted, fontSize: 12, lineHeight: 18 },
   focused: { borderColor: colors.blue },
-  invalid: { borderColor: colors.red },
-  error: { color: colors.red, fontSize: 12, lineHeight: 18 },
   dimmed: { opacity: 0.6 },
 });

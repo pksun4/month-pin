@@ -24,3 +24,14 @@ export type CardTypeCode = (typeof CARD_TYPES)[number]["code"];
 export function getCardType(code: string | null) {
   return CARD_TYPES.find((type) => type.code === code);
 }
+
+export const CARD_BENEFIT_TYPES = [
+  { code: "fixed", label: "고정" },
+  { code: "variable", label: "변동" },
+] as const;
+
+export type CardBenefitTypeCode = (typeof CARD_BENEFIT_TYPES)[number]["code"];
+
+export function getCardBenefitType(code: string | null) {
+  return CARD_BENEFIT_TYPES.find((type) => type.code === code);
+}

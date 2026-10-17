@@ -10,6 +10,7 @@ import {
 import { useSQLiteContext } from "expo-sqlite";
 import * as repository from "../data/database";
 import * as ledgerRepository from "../data/ledger";
+import * as cardBenefitRepository from "../data/card-benefits";
 import type {
   Expense,
   ExpenseInput,
@@ -17,6 +18,8 @@ import type {
   MethodKind,
   PaymentMethod,
   LedgerEntry,
+  CardBenefitMonth,
+  CardBenefitInput,
 } from "../data/models";
 
 interface Store {
@@ -34,7 +37,11 @@ interface Store {
     effectiveMonth?: string,
     renewalSourceId?: number,
   ) => Promise<void>;
-  saveMethod: (input: MethodInput, id?: number) => Promise<void>;
+  saveMethod: (
+    input: MethodInput,
+    id?: number,
+    effectiveMonth?: string,
+  ) => Promise<void>;
   endExpense: (id: number, endMonth: string) => Promise<void>;
   deleteExpense: (id: number) => Promise<void>;
   deleteMethod: (id: number) => Promise<void>;
@@ -42,6 +49,11 @@ interface Store {
   reorderExpenses: (ids: readonly number[]) => Promise<void>;
   loadLedgerMonth: (month: string) => Promise<LedgerEntry[]>;
   saveLedgerAmount: (id: number, amount: number | null) => Promise<void>;
+  loadCardBenefitMonth: (month: string) => Promise<CardBenefitMonth>;
+  saveCardBenefitMonth: (
+    month: string,
+    inputs: readonly CardBenefitInput[],
+  ) => Promise<void>;
 }
 
 const Context = createContext<Store | null>(null);
@@ -95,6 +107,12 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     [db, runDatabase],
   );
 
+  const loadCardBenefitMonth = useCallback(
+    (month: string) =>
+      runDatabase(() => cardBenefitRepository.loadCardBenefitMonth(db, month)),
+    [db, runDatabase],
+  );
+
   useEffect(() => {
     void Promise.resolve()
       .then(refresh)
@@ -138,8 +156,8 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
               renewalSourceId,
             ),
           ),
-        saveMethod: (input, id) =>
-          mutate(() => repository.saveMethod(db, input, id)),
+        saveMethod: (input, id, effectiveMonth) =>
+          mutate(() => repository.saveMethod(db, input, id, effectiveMonth)),
         endExpense: (id, endMonth) =>
           mutate(() => repository.endExpense(db, id, endMonth)),
         deleteExpense: (id) => mutate(() => repository.deleteExpense(db, id)),
@@ -149,6 +167,11 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
         reorderExpenses: (ids) =>
           mutate(() => repository.reorderExpenses(db, ids)),
         loadLedgerMonth,
+        loadCardBenefitMonth,
+        saveCardBenefitMonth: (month, inputs) =>
+          mutate(() =>
+            cardBenefitRepository.saveCardBenefitMonth(db, month, inputs),
+          ),
         saveLedgerAmount: (id, amount) =>
           mutate(() => ledgerRepository.saveLedgerAmount(db, id, amount)),
       }}

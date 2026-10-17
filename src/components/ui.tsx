@@ -1,6 +1,18 @@
 import { AppText as Text, AppTextInput as TextInput } from "./typography";
-import type { ComponentProps, ReactNode } from "react";
-import type { StyleProp, TextStyle } from "react-native";
+import {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+} from "react";
+import type {
+  StyleProp,
+  TextStyle,
+  TextInput as NativeTextInput,
+} from "react-native";
 import {
   ActivityIndicator,
   Keyboard,
@@ -24,11 +36,67 @@ export const colors = {
   blue: "#536DFE",
   softBlue: "#EBEEFF",
   orange: "#E67824",
+  green: "#16835D",
   softOrange: "#FFF0E1",
   orangeInk: "#A54C13",
   line: "#E7EAF2",
   red: "#BE3445",
+  softRed: "#FFF1F0",
 };
+
+const FormNavigationContext = createContext<
+  ((field: View | null, focus?: () => void) => void) | null
+>(null);
+
+export function useFormNavigation() {
+  return useContext(FormNavigationContext);
+}
+
+export function FieldLabel({
+  label,
+  required,
+  style,
+}: {
+  label: string;
+  required?: boolean;
+  style?: StyleProp<TextStyle>;
+}) {
+  return (
+    <Text
+      style={[s.fieldLabel, style]}
+      accessibilityLabel={required ? `${label}, 필수` : label}
+    >
+      {label}
+      {required && <Text style={s.requiredMark}> *</Text>}
+    </Text>
+  );
+}
+
+export function FieldMessage({
+  error,
+  hint,
+}: {
+  error?: string;
+  hint?: string;
+}) {
+  if (error)
+    return (
+      <View
+        style={s.fieldErrorRow}
+        accessibilityRole="alert"
+        accessibilityLiveRegion="polite"
+      >
+        <Ionicons
+          name="alert-circle-outline"
+          size={16}
+          color={colors.red}
+          accessible={false}
+        />
+        <Text style={s.fieldErrorText}>{error}</Text>
+      </View>
+    );
+  return hint ? <Text style={s.fieldHint}>{hint}</Text> : null;
+}
 export type IconName = ComponentProps<typeof Ionicons>["name"];
 
 export function Button({
@@ -170,6 +238,27 @@ export function FormModal({
   onClose: () => void;
   busy?: boolean;
 }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const contentRef = useRef<View>(null);
+  function revealField(field: View | null, focus?: () => void) {
+    requestAnimationFrame(() => {
+      if (!field || !contentRef.current) {
+        focus?.();
+        return;
+      }
+      field.measureLayout(
+        contentRef.current,
+        (_x, y) => {
+          scrollRef.current?.scrollTo({
+            y: Math.max(0, y - 12),
+            animated: true,
+          });
+          focus?.();
+        },
+        () => focus?.(),
+      );
+    });
+  }
   function close() {
     if (busy) return;
     Keyboard.dismiss();
@@ -202,11 +291,20 @@ export function FormModal({
             behavior={Platform.OS === "ios" ? "padding" : "height"}
           >
             <ScrollView
+              ref={scrollRef}
               contentContainerStyle={s.page}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
-              {children}
+              <FormNavigationContext.Provider value={revealField}>
+                <View
+                  ref={contentRef}
+                  collapsable={false}
+                  style={s.formContent}
+                >
+                  {children}
+                </View>
+              </FormNavigationContext.Provider>
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -222,6 +320,12 @@ export function Field({
   placeholder,
   numeric = false,
   maxLength = 40,
+  required,
+  error,
+  hint,
+  onBlur,
+  controlRef,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -229,27 +333,55 @@ export function Field({
   placeholder: string;
   numeric?: boolean;
   maxLength?: number;
+  required?: boolean;
+  error?: string;
+  hint?: string;
+  onBlur?: () => void;
+  controlRef?: Ref<NativeTextInput>;
+  disabled?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={s.field}>
-      <Text style={s.fieldLabel}>{label}</Text>
+      <FieldLabel label={label} required={required} />
       <TextInput
-        accessibilityLabel={label}
+        ref={controlRef}
+        accessibilityLabel={required ? `${label}, 필수` : label}
+        accessibilityHint={error || hint}
+        accessibilityState={{ disabled }}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.muted}
-        style={s.input}
+        style={[
+          s.input,
+          focused && { borderColor: colors.blue },
+          !!error && s.invalidInput,
+          disabled && { opacity: 0.6 },
+        ]}
+        editable={!disabled}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          onBlur?.();
+        }}
         keyboardType={numeric ? "number-pad" : "default"}
         maxLength={maxLength}
         autoCorrect={false}
         returnKeyType="done"
       />
+      <FieldMessage error={error} hint={hint} />
     </View>
   );
 }
 
 export const s = StyleSheet.create({
+  formContent: { gap: 20 },
+  requiredMark: { color: colors.red, fontSize: 12 },
+  invalidInput: { borderColor: colors.red, backgroundColor: colors.softRed },
+  fieldErrorRow: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
+  fieldErrorText: { flex: 1, color: colors.red, fontSize: 12, lineHeight: 18 },
+  fieldHint: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   screen: { flex: 1, backgroundColor: colors.bg },
   page: {
     padding: 22,

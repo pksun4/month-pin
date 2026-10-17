@@ -1,5 +1,5 @@
 import { AppText as Text, AppTextInput as TextInput } from "./typography";
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type Ref } from "react";
 import {
   FlatList,
   Keyboard,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { colors, s } from "./ui";
+import { colors, s, FieldLabel, FieldMessage } from "./ui";
 
 interface SelectOption<Code> {
   code: Code;
@@ -34,6 +34,11 @@ export function FormSelect<Code extends string | number | null>({
   placeholder = "선택해 주세요",
   disabled = false,
   inlineLabel = false,
+  required,
+  error,
+  hint,
+  onBlur,
+  controlRef,
 }: {
   label: string;
   options: readonly SelectOption<Code>[];
@@ -42,6 +47,11 @@ export function FormSelect<Code extends string | number | null>({
   placeholder?: string;
   disabled?: boolean;
   inlineLabel?: boolean;
+  required?: boolean;
+  error?: string;
+  hint?: string;
+  onBlur?: () => void;
+  controlRef?: Ref<View>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -66,42 +76,50 @@ export function FormSelect<Code extends string | number | null>({
   function close() {
     Keyboard.dismiss();
     setOpen(false);
+    onBlur?.();
   }
   return (
-    <View style={[s.field, inline && styles.inline]}>
-      <Text style={[s.fieldLabel, inline && { width: 68 * fontScale }]}>
-        {label}
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${label}, ${selected?.label ?? placeholder}${selected?.description ? `, ${selected.description}` : ""}`}
-        accessibilityHint="선택 목록을 열어 검색할 수 있어요."
-        accessibilityState={{ expanded: open, disabled }}
-        disabled={disabled}
-        onPress={() => {
-          Keyboard.dismiss();
-          setQuery("");
-          setOpen(true);
-        }}
-        style={({ pressed }) => [
-          s.compactInput,
-          inline && styles.inlineTrigger,
-          (pressed || disabled) && styles.dimmed,
-        ]}
-      >
-        {selected?.icon}
-        <Text
-          numberOfLines={1}
-          style={[styles.value, !selected && styles.placeholder]}
-        >
-          {selected?.label ?? placeholder}
-        </Text>
-        <Ionicons
-          name={open ? "chevron-up" : "chevron-down"}
-          size={16}
-          color={colors.muted}
+    <View style={s.field}>
+      <View style={inline ? styles.inline : s.field}>
+        <FieldLabel
+          label={label}
+          required={required}
+          style={inline ? { width: 68 * fontScale } : undefined}
         />
-      </Pressable>
+        <Pressable
+          ref={controlRef}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}, ${selected?.label ?? placeholder}${selected?.description ? `, ${selected.description}` : ""}`}
+          accessibilityHint={error || "선택 목록을 열어 검색할 수 있어요."}
+          accessibilityState={{ expanded: open, disabled }}
+          disabled={disabled}
+          onPress={() => {
+            Keyboard.dismiss();
+            setQuery("");
+            setOpen(true);
+          }}
+          style={({ pressed }) => [
+            s.compactInput,
+            inline && styles.inlineTrigger,
+            !!error && s.invalidInput,
+            (pressed || disabled) && styles.dimmed,
+          ]}
+        >
+          {selected?.icon}
+          <Text
+            numberOfLines={1}
+            style={[styles.value, !selected && styles.placeholder]}
+          >
+            {selected?.label ?? placeholder}
+          </Text>
+          <Ionicons
+            name={open ? "chevron-up" : "chevron-down"}
+            size={16}
+            color={colors.muted}
+          />
+        </Pressable>
+      </View>
+      <FieldMessage error={error} hint={hint} />
       <Modal
         visible={open && !disabled}
         transparent

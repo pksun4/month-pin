@@ -1,5 +1,9 @@
 import type { ProviderCode } from "./providers";
-import type { CardTypeCode, MethodKind } from "./method-types";
+import type {
+  CardBenefitTypeCode,
+  CardTypeCode,
+  MethodKind,
+} from "./method-types";
 import type {
   ExpenseAmountTypeCode,
   ExpenseCategoryCode,
@@ -16,6 +20,8 @@ export interface PaymentMethod {
   bankId: number | null;
   settlementDay: number | null;
   cardTypeCode: CardTypeCode | null;
+  benefitTypeCode: CardBenefitTypeCode | null;
+  benefitAmount: number | null;
   sortOrder: number;
 }
 
@@ -62,4 +68,25 @@ export interface LedgerEntry {
   providerName: string | null;
   methodName: string | null;
   cardTypeCode: CardTypeCode | null;
+}
+
+export interface CardBenefitEntry {
+  methodId: number;
+  name: string;
+  providerCode: ProviderCode | null;
+  providerName: string;
+  benefitTypeCode: CardBenefitTypeCode;
+  expectedAmount: number;
+  amount: number | null;
+}
+
+export interface CardBenefitMonth {
+  month: string;
+  confirmed: boolean;
+  cards: CardBenefitEntry[];
+}
+
+export interface CardBenefitInput {
+  methodId: number;
+  amount: number;
 }

@@ -1,7 +1,12 @@
 import { AppText as Text } from "./typography";
 import { Pressable, StyleSheet, View } from "react-native";
 import type { LedgerEntry } from "../data/models";
-import { calendarDays, dailyLedger, monthKey } from "../utils/ledger";
+import {
+  calendarDays,
+  dailyLedger,
+  daysInMonth,
+  monthKey,
+} from "../utils/ledger";
 import { money } from "../utils/expenses";
 import { colors } from "./ui";
 
@@ -12,13 +17,18 @@ export function LedgerCalendar({
   entries,
   selectedDay,
   onSelect,
+  benefitsConfirmed = false,
+  benefitsPending = false,
 }: {
   month: string;
   entries: readonly LedgerEntry[];
   selectedDay: number;
   onSelect: (day: number) => void;
+  benefitsConfirmed?: boolean;
+  benefitsPending?: boolean;
 }) {
   const days = calendarDays(month);
+  const lastDay = daysInMonth(month);
   const totals = dailyLedger(entries);
   const now = new Date();
   const today = monthKey(now) === month ? now.getDate() : null;
@@ -48,7 +58,7 @@ export function LedgerCalendar({
               <Pressable
                 key={column}
                 accessibilityRole="button"
-                accessibilityLabel={`${month.replace("-", "년 ")}월 ${day}일${day === today ? ", 오늘" : ""}, ${summary?.count ?? 0}건, ${money(summary?.total ?? 0)}${summary?.pending ? `, 금액 미입력 ${summary.pending}건` : ""}`}
+                accessibilityLabel={`${month.replace("-", "년 ")}월 ${day}일${day === today ? ", 오늘" : ""}, ${summary?.count ?? 0}건, ${money(summary?.total ?? 0)}${summary?.pending ? `, 금액 미입력 ${summary.pending}건` : ""}${day === lastDay ? `, 카드 혜택 정산 ${benefitsConfirmed ? "확정 완료" : "확정 전"}` : ""}`}
                 accessibilityState={{ selected }}
                 onPress={() => onSelect(day)}
                 style={({ pressed }) => [
@@ -80,7 +90,15 @@ export function LedgerCalendar({
                     {summary.total.toLocaleString("ko-KR")}
                   </Text>
                 )}
-                {!!summary?.pending && <View style={styles.dot} />}
+                {(!!summary?.pending ||
+                  (day === lastDay && benefitsPending)) && (
+                  <View style={styles.indicators}>
+                    {!!summary?.pending && <View style={styles.dot} />}
+                    {day === lastDay && benefitsPending && (
+                      <View style={[styles.dot, styles.benefitDot]} />
+                    )}
+                  </View>
+                )}
               </Pressable>
             );
           })}
@@ -88,9 +106,15 @@ export function LedgerCalendar({
       ))}
       <View style={styles.legend}>
         <Text style={styles.legendText}>날짜별 합계 · 원</Text>
-        <View style={styles.legendItem}>
-          <View style={styles.dot} />
-          <Text style={styles.legendText}>금액 미입력</Text>
+        <View style={styles.legendGroup}>
+          <View style={styles.legendItem}>
+            <View style={[styles.dot, styles.legendDot]} />
+            <Text style={styles.legendText}>변동비 미입력</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.dot, styles.benefitDot, styles.legendDot]} />
+            <Text style={styles.legendText}>혜택 미확정</Text>
+          </View>
         </View>
       </View>
     </View>
@@ -117,7 +141,8 @@ const styles = StyleSheet.create({
   cell: {
     flex: 1,
     minWidth: 0,
-    height: 64,
+    minHeight: 64,
+    paddingBottom: 4,
     paddingHorizontal: 1,
     paddingTop: 5,
     alignItems: "center",
@@ -144,13 +169,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.orange,
     marginTop: 3,
   },
+  indicators: { flexDirection: "row", alignItems: "center", gap: 4 },
+  benefitDot: { backgroundColor: colors.green },
   legend: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 8,
     paddingTop: 6,
-    gap: 8,
+    gap: 12,
+  },
+  legendGroup: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginLeft: "auto",
+    maxWidth: "100%",
   },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  legendDot: { marginTop: 0, flexShrink: 0 },
   legendText: { color: colors.muted, fontSize: 10, lineHeight: 16 },
 });

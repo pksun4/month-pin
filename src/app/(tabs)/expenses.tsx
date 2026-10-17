@@ -8,7 +8,7 @@ import type { ExpenseViewCode } from "../../data/expense-types";
 import { useMonthPin } from "../../hooks/use-month-pin";
 
 export default function ExpensesScreen() {
-  const [view, setView] = useState<ExpenseViewCode>("list");
+  const [view, setView] = useState<ExpenseViewCode>("calendar");
   const { busy } = useMonthPin();
   const switcher = (
     <ExpenseViewButton value={view} disabled={busy} onChange={setView} />
