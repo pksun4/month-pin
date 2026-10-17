@@ -195,14 +195,16 @@ export function ExpenseCalendarView({
                       </Text>
                     </View>
                   </View>
-                  <LedgerCalendar
-                    month={month}
-                    entries={entries}
-                    selectedDay={selectedDay}
-                    onSelect={setSelectedDay}
-                    benefitsConfirmed={benefitSummary.confirmed}
-                    benefitsPending={benefitSummary.pending > 0}
-                  />
+                  <View style={styles.calendarSection}>
+                    <LedgerCalendar
+                      month={month}
+                      entries={entries}
+                      selectedDay={selectedDay}
+                      onSelect={setSelectedDay}
+                      benefitsConfirmed={benefitSummary.confirmed}
+                      benefitsPending={benefitSummary.pending > 0}
+                    />
+                  </View>
                   <View style={styles.dayHeader}>
                     <Text style={s.sectionTitle}>
                       {monthIndex + 1}월 {selectedDay}일
@@ -215,12 +217,20 @@ export function ExpenseCalendarView({
               )}
             </View>
           }
-          renderItem={({ item }) => (
-            <LedgerEntryRow
-              entry={item}
-              disabled={busy}
-              onPress={() => setEditing(item)}
-            />
+          renderItem={({ item, index }) => (
+            <View
+              style={[
+                styles.entryGroupRow,
+                index === 0 && styles.entryGroupFirst,
+                index === selectedEntries.length - 1 && styles.entryGroupLast,
+              ]}
+            >
+              <LedgerEntryRow
+                entry={item}
+                disabled={busy}
+                onPress={() => setEditing(item)}
+              />
+            </View>
           )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
@@ -254,6 +264,8 @@ export function ExpenseCalendarView({
                     onPress={() => setSettling(cardBenefits.snapshot)}
                     style={({ pressed }) => [
                       styles.benefitSettlement,
+                      selectedEntries.length > 0 &&
+                        styles.settlementAfterEntries,
                       pressed && { opacity: 0.65 },
                     ]}
                   >
@@ -266,10 +278,10 @@ export function ExpenseCalendarView({
                       <Text style={styles.settlementTitle}>카드 혜택 정산</Text>
                       <Text style={styles.settlementCaption}>
                         {benefitSummary.confirmed
-                          ? "이 달의 혜택을 확정했어요 · 수정 가능"
+                          ? "확정 완료 · 금액 수정"
                           : benefitSummary.variableCount
-                            ? `변동 카드 ${benefitSummary.pending}개 · 실제 혜택을 입력해 주세요`
-                            : "변동 혜택 카드는 결제수단에서 등록해 주세요"}
+                            ? `변동 카드 ${benefitSummary.pending}개 · 금액 입력`
+                            : "결제수단에서 변동 혜택 카드 등록"}
                       </Text>
                     </View>
                     {benefitSummary.variableCount > 0 && (
@@ -335,7 +347,8 @@ export function ExpenseCalendarView({
 const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   page: { gap: 0, paddingTop: 16 },
-  header: { gap: 12, marginBottom: 8 },
+  header: { gap: 8, marginBottom: 8 },
+  calendarSection: { marginTop: 4 },
   monthBar: { flexDirection: "row", alignItems: "center", gap: 2 },
   monthButton: {
     width: 44,
@@ -368,7 +381,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 8,
     gap: 4,
   },
   summaryRow: {
@@ -396,8 +409,8 @@ const styles = StyleSheet.create({
   estimateRow: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
-    marginTop: 4,
-    paddingTop: 8,
+    marginTop: 2,
+    paddingTop: 6,
   },
   estimateLabel: {
     flexShrink: 1,
@@ -410,14 +423,14 @@ const styles = StyleSheet.create({
   count: { fontSize: 12, lineHeight: 20, color: colors.muted },
   pendingBadge: {
     backgroundColor: colors.softOrange,
-    borderRadius: 8,
-    paddingHorizontal: 8,
+    borderRadius: 6,
+    paddingHorizontal: 6,
     paddingVertical: 2,
   },
   pendingLabel: {
-    fontSize: 12,
-    lineHeight: 20,
-    fontWeight: "700",
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "600",
     color: colors.orangeInk,
   },
   estimateValue: {
@@ -432,19 +445,21 @@ const styles = StyleSheet.create({
   benefitSettlement: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    minHeight: 56,
+    gap: 8,
     backgroundColor: colors.white,
     borderRadius: 14,
-    padding: 14,
-    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
+  settlementAfterEntries: { marginTop: 12 },
   settlementTitle: {
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 20,
     fontWeight: "600",
     color: colors.ink,
   },
-  settlementCaption: { fontSize: 12, lineHeight: 18, color: colors.muted },
+  settlementCaption: { fontSize: 11, lineHeight: 18, color: colors.muted },
   loading: { alignItems: "center", paddingVertical: 48 },
   dayHeader: {
     flexDirection: "row",
@@ -459,6 +474,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.ink,
   },
+  entryGroupRow: { overflow: "hidden" },
+  entryGroupFirst: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
+  entryGroupLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   separator: { height: 1, backgroundColor: colors.line },
   footer: { fontSize: 11, lineHeight: 18, color: colors.muted, paddingTop: 12 },
 });

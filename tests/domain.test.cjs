@@ -5541,9 +5541,14 @@ test("benefit form requires every variable actual, accepts zero, prevents duplic
       .map((node) => node.props);
   const button = () => render().find((node) => node.type === "Button").props;
   assert.equal(fields().length, 2);
-  assert.ok(
-    fields().every((field) => field.error === "" && field.value === ""),
+  assert.ok(fields().every((field) => field.error === ""));
+  assert.deepEqual(
+    fields().map((field) => field.value),
+    ["5,000", "3,000"],
   );
+  assert.equal(saves.length, 0);
+  fields()[0].onChange("");
+  fields()[1].onChange("");
   button().onPress();
   assert.equal(saves.length, 0);
   assert.ok(fields().every((field) => field.error));
@@ -6001,5 +6006,86 @@ test("entered variable expense amounts remain editable, including a previously e
     );
   } finally {
     db.sqlite.close();
+  }
+});
+
+test("benefit form prefills estimates but confirms only on submit and preserves saved actuals including zero", async () => {
+  for (const confirmed of [false, true]) {
+    const snapshot = {
+      month: "2026-10",
+      confirmed,
+      cards: [
+        {
+          methodId: 1,
+          name: "first",
+          providerName: "card",
+          benefitTypeCode: "variable",
+          expectedAmount: 5000,
+          amount: confirmed ? 0 : null,
+        },
+        {
+          methodId: 2,
+          name: "second",
+          providerName: "card",
+          benefitTypeCode: "variable",
+          expectedAmount: 0,
+          amount: confirmed ? 2500 : null,
+        },
+      ],
+    };
+    const original = structuredClone(snapshot);
+    const calls = [];
+    let closed = 0;
+    const runtime = hookRuntime("src/components/card-benefit-form.tsx", {
+      "react-native": { View: "View" },
+      "./typography": { AppText: "Text" },
+      "../hooks/use-month-pin": {
+        useMonthPin: () => ({
+          busy: false,
+          saveCardBenefitMonth: async (month, inputs) =>
+            calls.push({ month, inputs }),
+        }),
+      },
+      "../utils/expenses": domain,
+      "../utils/ledger": ledgerDomain,
+      "./ui": {
+        Button: "Button",
+        Field: "Field",
+        FieldMessage: "FieldMessage",
+        s: {},
+        useFormNavigation: () => null,
+      },
+    });
+    const flatten = (node) =>
+      Array.isArray(node)
+        ? node.flatMap(flatten)
+        : node && typeof node === "object"
+          ? [node, ...flatten(node.props?.children)]
+          : [];
+    const nodes = flatten(
+      runtime.render(({ CardBenefitForm }) =>
+        CardBenefitForm({ snapshot, onClose: () => closed++ }),
+      ),
+    );
+    const fields = nodes.filter((node) => node.props?.card);
+    assert.deepEqual(
+      fields.map((node) => node.props.value),
+      confirmed ? ["0", "2,500"] : ["5,000", "0"],
+    );
+    assert.equal(calls.length, 0);
+    assert.deepEqual(snapshot, original);
+    nodes.find((node) => node.type === "Button").props.onPress();
+    await settle();
+    assert.deepEqual(calls, [
+      {
+        month: "2026-10",
+        inputs: [
+          { methodId: 1, amount: confirmed ? 0 : 5000 },
+          { methodId: 2, amount: confirmed ? 2500 : 0 },
+        ],
+      },
+    ]);
+    assert.equal(closed, 1);
+    assert.deepEqual(snapshot, original);
   }
 });

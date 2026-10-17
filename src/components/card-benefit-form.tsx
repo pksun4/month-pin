@@ -27,7 +27,7 @@ export function CardBenefitForm({
     Object.fromEntries(
       variable.map((card) => [
         card.methodId,
-        card.amount === null ? "" : formatAmountInput(String(card.amount)),
+        formatAmountInput(String(card.amount ?? card.expectedAmount)),
       ]),
     ),
   );
@@ -79,8 +79,10 @@ export function CardBenefitForm({
   return (
     <>
       <Text style={s.body}>
-        {formatMonth(snapshot.month)}의 실제 카드 혜택을 입력해 주세요. 혜택이
-        없으면 0원을 입력할 수 있어요.
+        {formatMonth(snapshot.month)}의 실제 카드 혜택을 확인해 주세요.{" "}
+        {!snapshot.confirmed &&
+          "예상 금액을 미리 채웠어요. 실제와 다르면 수정해 주세요. "}
+        혜택이 없으면 0원을 입력해 주세요.
       </Text>
       {variable.map((card) => (
         <CardBenefitAmountField

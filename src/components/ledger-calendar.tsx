@@ -137,11 +137,11 @@ const styles = StyleSheet.create({
     color: colors.muted,
     paddingBottom: 4,
   },
-  blank: { flex: 1, height: 64 },
+  blank: { flex: 1, height: 57 },
   cell: {
     flex: 1,
     minWidth: 0,
-    minHeight: 64,
+    minHeight: 57,
     paddingBottom: 4,
     paddingHorizontal: 1,
     paddingTop: 5,
