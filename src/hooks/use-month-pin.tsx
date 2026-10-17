@@ -11,6 +11,8 @@ import { useSQLiteContext } from "expo-sqlite";
 import * as repository from "../data/database";
 import * as ledgerRepository from "../data/ledger";
 import * as cardBenefitRepository from "../data/card-benefits";
+import * as annualRepository from "../data/annual-summary";
+import * as taxRepository from "../data/year-end-tax";
 import type {
   Expense,
   ExpenseInput,
@@ -20,6 +22,8 @@ import type {
   LedgerEntry,
   CardBenefitMonth,
   CardBenefitInput,
+  AnnualSummary,
+  YearEndTaxSettings,
 } from "../data/models";
 
 interface Store {
@@ -50,6 +54,9 @@ interface Store {
   loadLedgerMonth: (month: string) => Promise<LedgerEntry[]>;
   saveLedgerAmount: (id: number, amount: number | null) => Promise<void>;
   loadCardBenefitMonth: (month: string) => Promise<CardBenefitMonth>;
+  loadAnnualSummary: (year: number) => Promise<AnnualSummary>;
+  loadYearEndTaxSettings: (year: number) => Promise<YearEndTaxSettings>;
+  saveYearEndTaxSalary: (year: number, grossSalary: number) => Promise<void>;
   saveCardBenefitMonth: (
     month: string,
     inputs: readonly CardBenefitInput[],
@@ -113,6 +120,18 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     [db, runDatabase],
   );
 
+  const loadAnnualSummary = useCallback(
+    (year: number) =>
+      runDatabase(() => annualRepository.loadAnnualSummary(db, year)),
+    [db, runDatabase],
+  );
+
+  const loadYearEndTaxSettings = useCallback(
+    (year: number) =>
+      runDatabase(() => taxRepository.loadYearEndTaxSettings(db, year)),
+    [db, runDatabase],
+  );
+
   useEffect(() => {
     void Promise.resolve()
       .then(refresh)
@@ -168,6 +187,12 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
           mutate(() => repository.reorderExpenses(db, ids)),
         loadLedgerMonth,
         loadCardBenefitMonth,
+        loadAnnualSummary,
+        loadYearEndTaxSettings,
+        saveYearEndTaxSalary: (year, grossSalary) =>
+          mutate(() =>
+            taxRepository.saveYearEndTaxSalary(db, year, grossSalary),
+          ),
         saveCardBenefitMonth: (month, inputs) =>
           mutate(() =>
             cardBenefitRepository.saveCardBenefitMonth(db, month, inputs),

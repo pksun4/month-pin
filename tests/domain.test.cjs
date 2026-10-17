@@ -39,6 +39,10 @@ const ledgerDomain = loadTypeScript("src/utils/ledger.ts");
 const cardBenefitRepository = loadTypeScript("src/data/card-benefits.ts");
 const cardBenefitDomain = loadTypeScript("src/utils/card-benefits.ts");
 const cardBenefitHistory = loadTypeScript("src/data/card-benefit-history.ts");
+const annualRepository = loadTypeScript("src/data/annual-summary.ts");
+const annualDomain = loadTypeScript("src/utils/annual-summary.ts");
+const taxRepository = loadTypeScript("src/data/year-end-tax.ts");
+const taxDomain = loadTypeScript("src/utils/year-end-tax.ts");
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -248,6 +252,19 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
       },
     },
     "../data/ledger": { loadLedgerMonth: async () => [] },
+    "../data/annual-summary": {
+      loadAnnualSummary: async (db, year) => ({ year, months: [] }),
+    },
+    "../data/year-end-tax": {
+      loadYearEndTaxSettings: async (db, year) => ({
+        year,
+        grossSalary: 40000000,
+      }),
+      saveYearEndTaxSalary: async () => {
+        if (failWrite) throw new Error("Write failed");
+        writes++;
+      },
+    },
     "../data/card-benefits": {
       loadCardBenefitMonth: async (db, month) => ({
         month,
@@ -289,6 +306,19 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
     confirmed: false,
     cards: [],
   });
+  const revisionBeforeTax = render().dataRevision;
+  await render().saveYearEndTaxSalary(2026, 40000000);
+  assert.equal(render().dataRevision, revisionBeforeTax + 1);
+  assert.deepEqual(await render().loadYearEndTaxSettings(2026), {
+    year: 2026,
+    grossSalary: 40000000,
+  });
+  failWrite = true;
+  await assert.rejects(
+    render().saveYearEndTaxSalary(2026, 40000000),
+    /Write failed/,
+  );
+  assert.equal(render().dataRevision, revisionBeforeTax + 1);
 });
 
 function sqliteAdapter(path = ":memory:") {
@@ -858,7 +888,7 @@ test("v8 upgrade preserves every monthly record, marks actual zero and retries a
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(
       await ledgerRepository.readLedgerMonth(db, ledgerDomain.monthKey()),
@@ -1231,7 +1261,7 @@ test("v7 ledger migration rolls back failures and preserves existing records and
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readExpenses(db), expenses);
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -2125,7 +2155,7 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
 
     db.sqlite.close();
@@ -2215,7 +2245,7 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -2708,7 +2738,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -2881,7 +2911,7 @@ test("v4 order upgrade preserves types, amounts and links; partial migration rol
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     const expenses = await repository.readExpenses(db);
     assert.deepEqual(
@@ -3068,7 +3098,7 @@ test("v5 category migration preserves IDs, amounts, links, custom order and dele
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -3243,7 +3273,7 @@ test("v3 amount type migration preserves data, links and deleted IDs; a failure 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -3539,7 +3569,7 @@ test("v10 migration converts date settings to monthly latest values atomically w
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.equal((await repository.readExpenses(db))[0].startMonth, "1000-01");
     assert.deepEqual(
@@ -4046,7 +4076,7 @@ test("v11 migration preserves retired card totals and calendar history, rolls ba
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readExpenses(db, "ended"), ended);
     assert.deepEqual(
@@ -4701,7 +4731,7 @@ test("v12 benefit migration preserves data and references, rolls back failures, 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(
       await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
@@ -5295,7 +5325,7 @@ test("v13 settlement migration preserves legacy data, rolls back and retries, an
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -5876,7 +5906,7 @@ test("v14 benefit history migration preserves confirmations and unvisited estima
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      15,
+      16,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(
@@ -6088,4 +6118,1017 @@ test("benefit form prefills estimates but confirms only on submit and preserves 
     assert.equal(closed, 1);
     assert.deepEqual(snapshot, original);
   }
+});
+
+test("annual summary matches all twelve calendars, keeps actual zero and confirmed benefits, and remains idempotent", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second } = await seedSettlementCards(db);
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      startMonth: "2024-01",
+    });
+    const fixed = (await repository.readExpenses(db))[0];
+    // A historical price change, including months not previously opened.
+    await db.runAsync(
+      "INSERT INTO expense_amount_versions (expenseId, effectiveMonth, amountTypeCode, amount) VALUES (?, '2024-07', 'fixed', 60000)",
+      fixed.id,
+    );
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      startMonth: "2024-01",
+      name: "보험료",
+      amountTypeCode: "variable",
+      amount: null,
+    });
+    for (const [month, amount] of [
+      ["2024-02", 0],
+      ["2024-03", 15000],
+    ]) {
+      const entry = (await ledgerRepository.loadLedgerMonth(db, month)).find(
+        (entry) => entry.amountTypeCode === "variable",
+      );
+      await ledgerRepository.saveLedgerAmount(db, entry.id, amount);
+    }
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2024-02", [
+      { methodId: first.id, amount: 0 },
+      { methodId: second.id, amount: 2000 },
+    ]);
+    const confirmed = await cardBenefitRepository.loadCardBenefitMonth(
+      db,
+      "2024-02",
+    );
+    const annual = await annualRepository.loadAnnualSummary(db, 2024);
+    assert.equal(annual.months.length, 12);
+    assert.deepEqual(
+      annual.months.map((month) => month.month),
+      annualDomain.monthsOfYear(2024),
+    );
+    assert.deepEqual(annualDomain.annualTotals(annual), {
+      expenseTotal: 675000,
+      benefitTotal: 210000,
+      estimatedTotal: 465000,
+      expenseCount: 24,
+      pendingExpenses: 10,
+      pendingBenefitMonths: 11,
+      benefitCount: 36,
+    });
+    for (const month of annual.months) {
+      const ledger = ledgerDomain.ledgerSummary(
+        await ledgerRepository.loadLedgerMonth(db, month.month),
+      );
+      const benefits = cardBenefitDomain.cardBenefitMonthSummary(
+        await cardBenefitRepository.loadCardBenefitMonth(db, month.month),
+      );
+      assert.equal(month.expenseTotal, ledger.total);
+      assert.equal(month.pendingExpenses, ledger.pending);
+      assert.equal(month.benefitTotal, benefits.total);
+      assert.equal(month.pendingBenefits, benefits.pending);
+    }
+    const leapFebruary = await ledgerRepository.loadLedgerMonth(db, "2024-02");
+    assert.ok(leapFebruary.every((entry) => entry.day === 29));
+    assert.equal(
+      leapFebruary.find((entry) => entry.amountTypeCode === "variable").amount,
+      0,
+    );
+    assert.deepEqual(
+      await annualRepository.loadAnnualSummary(db, 2024),
+      annual,
+    );
+    assert.deepEqual(
+      await cardBenefitRepository.loadCardBenefitMonth(db, "2024-02"),
+      confirmed,
+    );
+    assert.equal(
+      (await db.getFirstAsync("SELECT COUNT(*) AS count FROM ledger_entries"))
+        .count,
+      24,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      16,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("annual summary respects expense end/deletion and card benefit history without losing past values", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const now = new Date();
+    const year = now.getFullYear();
+    const throughMonth = now.getMonth() + 1;
+    const { first } = await seedSettlementCards(db);
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      startMonth: `${year}-01`,
+    });
+    const expense = (await repository.readExpenses(db))[0];
+    const before = await annualRepository.loadAnnualSummary(db, year);
+    await repository.deleteExpense(db, expense.id);
+    await repository.deleteMethod(db, first.id);
+    const after = await annualRepository.loadAnnualSummary(db, year);
+    assert.equal(
+      annualDomain.annualTotals(after).expenseTotal,
+      throughMonth * 50000,
+    );
+    for (let index = 0; index < 12; index++) {
+      assert.equal(
+        after.months[index].expenseTotal,
+        index < throughMonth ? 50000 : 0,
+      );
+      assert.equal(
+        after.months[index].benefitTotal,
+        before.months[index].benefitTotal - (index < throughMonth ? 0 : 5000),
+      );
+    }
+    assert.equal(annualDomain.annualTotals(before).expenseTotal, 600000);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("annual reads validate years, show empty and negative totals, and roll back generated months after a failure", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    for (const year of [999, 10000, 2024.5, NaN, "2024"])
+      await assert.rejects(
+        annualRepository.loadAnnualSummary(db, year),
+        /연도/,
+      );
+    assert.equal(annualDomain.monthsOfYear(1000)[0], "1000-01");
+    assert.equal(annualDomain.monthsOfYear(9999)[11], "9999-12");
+    const empty = await annualRepository.loadAnnualSummary(db, 2024);
+    assert.equal(empty.months.length, 12);
+    assert.ok(
+      Object.values(annualDomain.annualTotals(empty)).every(
+        (value) => value === 0,
+      ),
+    );
+    await seedSettlementCards(db);
+    const benefitsOnly = await annualRepository.loadAnnualSummary(db, 2024);
+    assert.equal(
+      annualDomain.annualTotals(benefitsOnly).estimatedTotal,
+      -216000,
+    );
+    await repository.saveExpense(db, {
+      ...insuranceInput,
+      startMonth: "2024-01",
+    });
+    const fail = {
+      ...db,
+      getAllAsync: async (sql, ...params) => {
+        if (
+          sql.includes("FROM monthly_card_benefits") &&
+          params[0] === "2024-06"
+        )
+          throw new Error("annual read failed");
+        return db.getAllAsync(sql, ...params);
+      },
+    };
+    await assert.rejects(
+      annualRepository.loadAnnualSummary(fail, 2024),
+      /annual read failed/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("SELECT COUNT(*) AS count FROM ledger_entries"))
+        .count,
+      0,
+    );
+    assert.equal(
+      annualDomain.annualTotals(
+        await annualRepository.loadAnnualSummary(db, 2024),
+      ).expenseTotal,
+      600000,
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("annual hook rejects stale years and revisions, pauses on tax view, retries errors, and refreshes on return", async () => {
+  const requests = [];
+  const store = {
+    busy: false,
+    dataRevision: 0,
+    loadAnnualSummary: (year) =>
+      new Promise((resolve, reject) =>
+        requests.push({ year, resolve, reject }),
+      ),
+  };
+  const runtime = hookRuntime("src/hooks/use-annual-summary.ts", {
+    "./use-month-pin": { useMonthPin: () => store },
+  });
+  const render = (year = 2024, enabled = true) =>
+    runtime.render(({ useAnnualSummary }) => useAnnualSummary(year, enabled));
+  assert.equal(render().loading, true);
+  runtime.flush();
+  render(2025);
+  runtime.flush();
+  requests[1].resolve({ year: 2025, months: [] });
+  await settle();
+  requests[0].resolve({ year: 2024, months: [] });
+  await settle();
+  assert.equal(render(2025).snapshot.year, 2025);
+  store.dataRevision++;
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  requests[2].reject(new Error("failed"));
+  await settle();
+  assert.ok(render(2025).error);
+  render(2025).retry();
+  assert.equal(render(2025).error, null);
+  runtime.flush();
+  render(2025, false);
+  runtime.flush();
+  requests[3].resolve({ year: 2025, months: [] });
+  await settle();
+  assert.equal(render(2025, false).snapshot, null);
+  assert.equal(render(2025, false).loading, false);
+  runtime.flush();
+  assert.equal(requests.length, 4);
+  render(2025);
+  runtime.flush();
+  requests[4].resolve({ year: 2025, months: [] });
+  await settle();
+  assert.equal(render(2025).snapshot.year, 2025);
+  store.busy = true;
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  store.busy = false;
+  render(2025);
+  runtime.flush();
+  requests[5].resolve({ year: 2025, months: [] });
+  await settle();
+  runtime.focus(false);
+  runtime.focus(true);
+  assert.equal(render(2025).snapshot, null);
+  requests[6].resolve({ year: 2025, months: [] });
+  await settle();
+  assert.equal(render(2025).snapshot.year, 2025);
+});
+
+test("settlement starts with annual summary and switches views without discarding the annual screen", () => {
+  const runtime = hookRuntime("src/app/(tabs)/settlement.tsx", {
+    "react-native": {
+      View: "View",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "../../components/annual-summary-view": { AnnualSummaryView: "Annual" },
+    "../../components/year-end-tax-view": { YearEndTaxView: "Tax" },
+    "../../components/list-controls": { ListTabs: "Tabs" },
+    "../../components/year-selector": { YearSelector: "YearSelector" },
+    "../../hooks/use-month-pin": { useMonthPin: () => ({ busy: false }) },
+    "../../components/ui": {
+      Header: "Header",
+      Screen: "Screen",
+      s: { flex: {} },
+    },
+    "../../data/settlement-types": loadTypeScript(
+      "src/data/settlement-types.ts",
+    ),
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = () =>
+    flatten(
+      runtime.render(({ default: SettlementScreen }) => SettlementScreen()),
+    );
+  let nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Tabs").props.value,
+    "annual_summary",
+  );
+  assert.equal(nodes.find((node) => node.type === "Annual").props.active, true);
+  const selectedYear = new Date().getFullYear() - 1;
+  nodes
+    .find((node) => node.type === "YearSelector")
+    .props.onChange(selectedYear);
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Annual").props.year,
+    selectedYear,
+  );
+  const options = nodes.find((node) => node.type === "Tabs").props.options;
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["연간 요약", "연말정산"],
+  );
+  nodes.find((node) => node.type === "Tabs").props.onChange("year_end_tax");
+  nodes = render();
+  assert.equal(nodes.find((node) => node.type === "Tax").props.active, true);
+  assert.equal(
+    nodes.find((node) => node.type === "Tax").props.year,
+    selectedYear,
+  );
+  assert.ok(!nodes.some((node) => node.type === "YearSelector"));
+  const taxYear = selectedYear - 1;
+  nodes.find((node) => node.type === "Tax").props.onYearChange(taxYear);
+  nodes = render();
+  assert.equal(nodes.find((node) => node.type === "Tax").props.year, taxYear);
+  assert.equal(
+    nodes.find((node) => node.type === "Annual").props.active,
+    false,
+  );
+  assert.equal(
+    nodes.find((node) => node.props?.children?.type === "Annual").props
+      .accessibilityElementsHidden,
+    true,
+  );
+  assert.equal(
+    nodes.find((node) => node.props?.children?.type === "Tax").props
+      .accessibilityElementsHidden,
+    false,
+  );
+  runtime.focus(false);
+  runtime.focus(true);
+  assert.equal(
+    render().find((node) => node.type === "Tabs").props.value,
+    "year_end_tax",
+  );
+  nodes.find((node) => node.type === "Tabs").props.onChange("annual_summary");
+  assert.equal(
+    render().find((node) => node.type === "YearSelector").props.year,
+    taxYear,
+  );
+  assert.equal(
+    render().find((node) => node.type === "Annual").props.active,
+    true,
+  );
+});
+
+test("annual view follows the shared year and shows loading and retry states without amounts", () => {
+  const requests = [];
+  let state = { snapshot: null, loading: true, error: null };
+  let retries = 0;
+  const runtime = hookRuntime("src/components/annual-summary-view.tsx", {
+    "react-native": {
+      View: "View",
+      Pressable: "Pressable",
+      ScrollView: "ScrollView",
+      ActivityIndicator: "Spinner",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "./typography": { AppText: "Text" },
+    "./ui": { Button: "Button", Empty: "Empty", s: {}, colors: {} },
+    "../hooks/use-annual-summary": {
+      useAnnualSummary: (year, active) => {
+        requests.push({ year, active });
+        return { ...state, retry: () => retries++ };
+      },
+    },
+    "../hooks/use-month-pin": { useMonthPin: () => ({ busy: false }) },
+    "../utils/annual-summary": annualDomain,
+    "../utils/expenses": domain,
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = (active = true, year = 2026) =>
+    flatten(
+      runtime.render(({ AnnualSummaryView }) =>
+        AnnualSummaryView({ active, year }),
+      ),
+    );
+  let nodes = render();
+  assert.ok(nodes.some((node) => node.type === "Spinner"));
+  assert.deepEqual(requests.at(-1), { year: 2026, active: true });
+  render(true, 2025);
+  assert.deepEqual(requests.at(-1), { year: 2025, active: true });
+  state = { snapshot: null, loading: false, error: "failed" };
+  nodes = render();
+  assert.ok(nodes.some((node) => node.props?.accessibilityRole === "alert"));
+  assert.ok(!nodes.some((node) => typeof node.type === "function"));
+  nodes.find((node) => node.type === "Button").props.onPress();
+  assert.equal(retries, 1);
+  render(false);
+  assert.equal(requests.at(-1).active, false);
+});
+
+test("tax salary is separate by year, editable, persists after reopening, and validates values at both layers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monthpin-tax-"));
+  const path = join(directory, "test.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    assert.deepEqual(await taxRepository.loadYearEndTaxSettings(db, 2026), {
+      year: 2026,
+      grossSalary: null,
+    });
+    await taxRepository.saveYearEndTaxSalary(db, 2025, 40000000);
+    await taxRepository.saveYearEndTaxSalary(db, 2026, 60000000);
+    await taxRepository.saveYearEndTaxSalary(db, 2025, 42000000);
+    assert.deepEqual(await taxRepository.loadYearEndTaxSettings(db, 2026), {
+      year: 2026,
+      grossSalary: 60000000,
+    });
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2025)).grossSalary,
+      42000000,
+    );
+    await taxRepository.saveYearEndTaxSalary(db, 2027, 0);
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2027)).grossSalary,
+      0,
+    );
+    for (const year of [999, 10000, 2026.1, NaN, "2026"]) {
+      await assert.rejects(
+        taxRepository.loadYearEndTaxSettings(db, year),
+        /연도/,
+      );
+      await assert.rejects(
+        taxRepository.saveYearEndTaxSalary(db, year, 40000000),
+        /연도/,
+      );
+    }
+    for (const amount of [
+      -1,
+      1.5,
+      10000000000,
+      NaN,
+      Infinity,
+      null,
+      "40000000",
+    ])
+      await assert.rejects(
+        taxRepository.saveYearEndTaxSalary(db, 2026, amount),
+        /총급여/,
+      );
+    for (const [year, amount] of [
+      [999, 1],
+      [10000, 1],
+      [2028, -1],
+      [2028, 1.5],
+      [2028, 10000000000],
+    ])
+      await assert.rejects(
+        db.runAsync(
+          "INSERT INTO annual_tax_settings (year, grossSalary) VALUES (?, ?)",
+          year,
+          amount,
+        ),
+      );
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          "SELECT COUNT(*) AS count FROM annual_tax_settings",
+        )
+      ).count,
+      3,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2026)).grossSalary,
+      60000000,
+    );
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2025)).grossSalary,
+      42000000,
+    );
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2027)).grossSalary,
+      0,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      16,
+    );
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("v15 tax migration preserves existing records, rolls back a failed migration and can retry", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { first, second } = await seedSettlementCards(db);
+    await repository.saveExpense(db, insuranceInput);
+    await ledgerRepository.loadLedgerMonth(db, "2026-02");
+    await cardBenefitRepository.saveCardBenefitMonth(db, "2026-02", [
+      { methodId: first.id, amount: 5000 },
+      { methodId: second.id, amount: 0 },
+    ]);
+    const preservedTables = [
+      "payment_methods",
+      "expenses",
+      "ledger_entries",
+      "expense_amount_versions",
+      "card_benefit_versions",
+      "monthly_card_benefits",
+    ];
+    const before = await Promise.all(
+      preservedTables.map((table) =>
+        db.getAllAsync(`SELECT * FROM ${table} ORDER BY rowid`),
+      ),
+    );
+    await db.execAsync(
+      "DROP TABLE annual_tax_settings; PRAGMA user_version = 15;",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 16;")
+        throw new Error("tax migration failed");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /tax migration failed/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      15,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'annual_tax_settings'",
+      ),
+      undefined,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      16,
+    );
+    assert.deepEqual(
+      await Promise.all(
+        preservedTables.map((table) =>
+          db.getAllAsync(`SELECT * FROM ${table} ORDER BY rowid`),
+        ),
+      ),
+      before,
+    );
+    await taxRepository.saveYearEndTaxSalary(db, 2026, 40000000);
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await taxRepository.loadYearEndTaxSettings(db, 2026)).grossSalary,
+      40000000,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("salary target uses exactly 25 percent and keeps empty, zero, fractional won and salary limits distinct", () => {
+  assert.equal(taxDomain.cardSpendingTarget(null), null);
+  assert.equal(taxDomain.cardSpendingTarget(0), 0);
+  assert.equal(taxDomain.cardSpendingTarget(40000000), 10000000);
+  assert.equal(taxDomain.cardSpendingTarget(45000001), 11250000.25);
+  assert.equal(taxDomain.cardSpendingTarget(9999999999), 2499999999.75);
+  for (const text of ["", " ", "-1", "1.5", "1e6", "10000000000", "salary"])
+    assert.equal(taxDomain.parseGrossSalary(text), null);
+  assert.equal(taxDomain.parseGrossSalary("40,000,000"), 40000000);
+  assert.equal(taxDomain.parseGrossSalary("0"), 0);
+  assert.equal(taxDomain.parseGrossSalary("9,999,999,999"), 9999999999);
+});
+
+test("tax hook hides other-year or outdated values, retries failures and pauses when inactive", async () => {
+  const requests = [];
+  const store = {
+    busy: false,
+    dataRevision: 0,
+    loadYearEndTaxSettings: (year) =>
+      new Promise((resolve, reject) =>
+        requests.push({ year, resolve, reject }),
+      ),
+  };
+  const runtime = hookRuntime("src/hooks/use-year-end-tax.ts", {
+    "./use-month-pin": { useMonthPin: () => store },
+  });
+  const render = (year = 2026, active = true) =>
+    runtime.render(({ useYearEndTax }) => useYearEndTax(year, active));
+  render();
+  runtime.flush();
+  render(2025);
+  runtime.flush();
+  requests[1].resolve({ year: 2025, grossSalary: 30000000 });
+  await settle();
+  requests[0].resolve({ year: 2026, grossSalary: 40000000 });
+  await settle();
+  assert.equal(render(2025).snapshot.grossSalary, 30000000);
+  store.busy = true;
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  store.dataRevision++;
+  store.busy = false;
+  render(2025);
+  runtime.flush();
+  requests[2].reject(new Error("failed"));
+  await settle();
+  assert.ok(render(2025).error);
+  render(2025).retry();
+  assert.equal(render(2025).error, null);
+  runtime.flush();
+  render(2025, false);
+  runtime.flush();
+  requests[3].resolve({ year: 2025, grossSalary: 0 });
+  await settle();
+  assert.equal(render(2025, false).snapshot, null);
+  assert.equal(render(2025, false).loading, false);
+  assert.equal(requests.length, 4);
+  render(2025);
+  runtime.flush();
+  requests[4].resolve({ year: 2025, grossSalary: 0 });
+  await settle();
+  assert.equal(render(2025).snapshot.grossSalary, 0);
+  runtime.focus(false);
+  runtime.focus(true);
+  assert.equal(render(2025).snapshot, null);
+  requests[5].resolve({ year: 2025, grossSalary: 10000000 });
+  await settle();
+  assert.equal(render(2025).snapshot.grossSalary, 10000000);
+});
+
+test("salary form validates on submit, previews targets, prevents duplicate saves and keeps values after errors", async () => {
+  const saves = [];
+  let finish;
+  let closed = 0;
+  let focused = 0;
+  const runtime = hookRuntime("src/components/year-end-salary-form.tsx", {
+    "react-native": { View: "View" },
+    "./typography": { AppText: "Text" },
+    "../hooks/use-month-pin": {
+      useMonthPin: () => ({
+        busy: false,
+        saveYearEndTaxSalary: (year, salary) => {
+          saves.push({ year, salary });
+          return new Promise((resolve, reject) => {
+            finish = { resolve, reject };
+          });
+        },
+      }),
+    },
+    "../utils/expenses": domain,
+    "../utils/year-end-tax": taxDomain,
+    "./ui": {
+      Field: "Field",
+      Button: "Button",
+      FieldMessage: "Message",
+      s: {},
+      useFormNavigation: () => null,
+    },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = () =>
+    flatten(
+      runtime.render(({ YearEndSalaryForm }) =>
+        YearEndSalaryForm({
+          settings: { year: 2026, grossSalary: null },
+          onClose: () => closed++,
+        }),
+      ),
+    );
+  const field = () => render().find((node) => node.type === "Field").props;
+  const button = () => render().find((node) => node.type === "Button").props;
+  assert.equal(field().value, "");
+  assert.equal(field().error, "");
+  field().controlRef.current = { focus: () => focused++ };
+  button().onPress();
+  assert.equal(saves.length, 0);
+  assert.equal(focused, 1);
+  assert.ok(field().error);
+  field().onChangeText("40000000");
+  assert.equal(field().value, "40,000,000");
+  assert.ok(
+    render().some((node) => node.props?.children?.includes?.("10,000,000원")),
+  );
+  assert.equal(saves.length, 0);
+  button().onPress();
+  button().onPress();
+  assert.deepEqual(saves, [{ year: 2026, salary: 40000000 }]);
+  finish.reject(new Error("save failed"));
+  await settle();
+  assert.equal(closed, 0);
+  assert.equal(field().value, "40,000,000");
+  assert.equal(
+    render().find((node) => node.type === "Message").props.error,
+    "save failed",
+  );
+  field().onChangeText("0");
+  button().onPress();
+  assert.deepEqual(saves[1], { year: 2026, salary: 0 });
+  finish.resolve();
+  await settle();
+  assert.equal(closed, 1);
+});
+
+test("tax view shows target with a salary modal action, hides saved salary text and accessibility values, and clears stale amounts", () => {
+  let state = {
+    loading: false,
+    error: null,
+    snapshot: { year: 2026, grossSalary: null },
+  };
+  let retries = 0;
+  let changedYear = null;
+  const runtime = hookRuntime("src/components/year-end-tax-view.tsx", {
+    "react-native": {
+      View: "View",
+      ScrollView: "ScrollView",
+      Pressable: "Pressable",
+      ActivityIndicator: "Spinner",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "./typography": { AppText: "Text" },
+    "./ui": { Button: "Button", FormModal: "Modal", s: {}, colors: {} },
+    "./year-end-salary-form": { YearEndSalaryForm: "SalaryForm" },
+    "./year-end-tax-guide": { YearEndTaxGuide: "TaxGuide" },
+    "./year-selector": { YearSelector: "YearSelector" },
+    "./list-controls": { CompactActionButton: "CompactActionButton" },
+    "../hooks/use-year-end-tax": {
+      useYearEndTax: () => ({ ...state, retry: () => retries++ }),
+    },
+    "../hooks/use-month-pin": { useMonthPin: () => ({ busy: false }) },
+    "../utils/year-end-tax": taxDomain,
+    "../utils/expenses": domain,
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = () =>
+    flatten(
+      runtime.render(({ YearEndTaxView }) =>
+        YearEndTaxView({
+          year: 2026,
+          active: true,
+          onYearChange: (year) => {
+            changedYear = year;
+          },
+        }),
+      ),
+    );
+  let nodes = render();
+  const salaryAction = () =>
+    nodes.find((node) =>
+      node.props?.accessibilityLabel?.startsWith("2026년 연봉 "),
+    );
+  assert.equal(salaryAction().props.label, "연봉 입력");
+  const yearSelector = () => nodes.find((node) => node.type === "YearSelector");
+  yearSelector().props.onChange(2025);
+  assert.equal(changedYear, 2025);
+  assert.ok(
+    nodes.findIndex((node) =>
+      node.props?.accessibilityLabel?.startsWith("목표금액"),
+    ) < nodes.indexOf(yearSelector()),
+  );
+  assert.ok(
+    nodes.indexOf(yearSelector()) <
+      nodes.findIndex(
+        (node) =>
+          node.props?.accessibilityLabel === "2026년 1월 사용금액 집계 전",
+      ),
+  );
+  assert.equal(
+    nodes.find((node) => node.props?.accessibilityLabel?.startsWith("목표금액"))
+      .props.children,
+    "—",
+  );
+  assert.equal(
+    nodes.find(
+      (node) => node.props?.accessibilityLabel === "잔여금액 총급여 입력 전",
+    ).props.children,
+    "—",
+  );
+  assert.ok(
+    nodes.findIndex((node) => node.props?.children === "목표금액") <
+      nodes.indexOf(salaryAction()),
+  );
+  salaryAction().props.onPress();
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "SalaryForm").props.settings.grossSalary,
+    null,
+  );
+  nodes.find((node) => node.type === "Modal").props.onClose();
+  state.snapshot = { year: 2026, grossSalary: 40000000 };
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.props?.accessibilityLabel?.startsWith("목표금액"))
+      .props.children,
+    "10,000,000원",
+  );
+  assert.equal(
+    nodes.find(
+      (node) => node.props?.accessibilityLabel === "잔여금액 사용금액 집계 전",
+    ).props.children,
+    "—",
+  );
+  const pageCopy = nodes
+    .flatMap((node) => [
+      node.type === "Text" ? node.props.children : "",
+      node.props?.accessibilityLabel ?? "",
+      node.props?.accessibilityHint ?? "",
+    ])
+    .flat(Infinity)
+    .join(" ");
+  assert.ok(!pageCopy.includes("40,000,000"));
+  assert.ok(!pageCopy.includes("40000000"));
+  assert.ok(!pageCopy.includes("연간 총급여"));
+  assert.equal(salaryAction().props.accessibilityLabel, "2026년 연봉 수정");
+  assert.equal(salaryAction().props.label, "연봉 수정");
+  assert.ok(
+    nodes.some(
+      (node) =>
+        node.props?.children === "총급여의 25% · 사용금액 소득공제 기준",
+    ),
+  );
+  nodes
+    .find(
+      (node) => node.props?.accessibilityLabel === "사용금액 소득공제율 안내",
+    )
+    .props.onPress();
+  nodes = render();
+  assert.ok(nodes.some((node) => node.type === "TaxGuide"));
+  assert.ok(!nodes.some((node) => node.type === "SalaryForm"));
+  assert.equal(
+    nodes.find((node) => node.type === "Modal").props.title,
+    "사용금액 소득공제 안내",
+  );
+  nodes.find((node) => node.type === "Modal").props.onClose();
+  nodes = render();
+  assert.ok(!nodes.some((node) => node.type === "Modal"));
+  salaryAction().props.onPress();
+  assert.equal(
+    render().find((node) => node.type === "SalaryForm").props.settings
+      .grossSalary,
+    40000000,
+  );
+  render()
+    .find((node) => node.type === "Modal")
+    .props.onClose();
+  state.snapshot = { year: 2026, grossSalary: 0 };
+  assert.equal(
+    render().find((node) =>
+      node.props?.accessibilityLabel?.startsWith("목표금액"),
+    ).props.children,
+    "0원",
+  );
+  state = { snapshot: null, loading: true, error: null };
+  nodes = render();
+  assert.ok(nodes.some((node) => node.type === "Spinner"));
+  assert.equal(yearSelector().props.year, 2026);
+  assert.ok(
+    !nodes.some((node) =>
+      node.props?.accessibilityLabel?.startsWith("목표금액"),
+    ),
+  );
+  state = { snapshot: null, loading: false, error: "failed" };
+  nodes = render();
+  nodes.find((node) => node.type === "Button").props.onPress();
+  assert.equal(retries, 1);
+});
+
+test("deduction guide explains tax bands before descending payment rates and shows a conditional tax-saving example without links", () => {
+  const runtime = hookRuntime("src/components/year-end-tax-guide.tsx", {
+    "react-native": {
+      View: "View",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "./typography": { AppText: "Text" },
+    "./ui": { colors: {} },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const nodes = flatten(
+    runtime.render(({ YearEndTaxGuide }) => YearEndTaxGuide()),
+  );
+  const rates = nodes.filter((node) =>
+    node.props?.accessibilityLabel?.includes("소득공제율"),
+  );
+  assert.deepEqual(
+    rates.map((node) => node.props.accessibilityLabel),
+    [
+      "체크카드 소득공제율 30%",
+      "현금영수증 소득공제율 30%",
+      "신용카드 소득공제율 15%",
+    ],
+  );
+  const bands = nodes.filter((node) =>
+    node.props?.accessibilityLabel?.startsWith("과세표준"),
+  );
+  assert.equal(bands.length, 8);
+  assert.ok(
+    bands[0].props.accessibilityLabel.includes(
+      "1,400만 원 이하 구간의 소득세율 6%",
+    ),
+  );
+  assert.ok(
+    bands[1].props.accessibilityLabel.includes(
+      "1,400만 원 초과 5,000만 원 이하 구간의 소득세율 15%",
+    ),
+  );
+  assert.ok(
+    bands[7].props.accessibilityLabel.includes(
+      "10억 원 초과 구간의 소득세율 45%",
+    ),
+  );
+  assert.ok(nodes.indexOf(bands[7]) < nodes.indexOf(rates[0]));
+  const text = nodes
+    .filter((node) => node.type === "Text")
+    .flatMap((node) => node.props.children)
+    .filter((child) => typeof child === "string")
+    .join(" ");
+  assert.ok(text.includes("비과세·각종 공제"));
+  assert.ok(text.includes("내 소득세율이 15%라면 소득세는 4만 5천 원 줄어요."));
+  assert.ok(text.includes("공제 한도가 남아"));
+  assert.ok(text.includes("지방소득세(소득세의 10%)는 별도"));
+  assert.ok(text.includes("미리 낸 세금보다 최종 세금이 적을 때"));
+  assert.ok(!nodes.some((node) => node.props?.href));
+});
+
+test("year selector hides the current-year shortcut on this year and labels the destination on other years", () => {
+  const changes = [];
+  const runtime = hookRuntime("src/components/year-selector.tsx", {
+    "react-native": {
+      View: "View",
+      Pressable: "Pressable",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "./typography": { AppText: "Text" },
+    "./ui": { colors: {} },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = (year = 2026, disabled = false) =>
+    flatten(
+      runtime.render(({ YearSelector }) =>
+        YearSelector({
+          year,
+          disabled,
+          onChange: (next) => changes.push(next),
+        }),
+      ),
+    );
+  const currentYear = new Date().getFullYear();
+  const currentButtons = render(currentYear).filter(
+    (node) => node.type === "Pressable",
+  );
+  assert.equal(currentButtons.length, 2);
+  for (const node of currentButtons) node.props.onPress();
+  assert.deepEqual(changes, [currentYear - 1, currentYear + 1]);
+  const previousYearButtons = render(currentYear - 1).filter(
+    (node) => node.type === "Pressable",
+  );
+  assert.equal(previousYearButtons.length, 3);
+  const shortcut = previousYearButtons.find(
+    (node) => node.props.accessibilityLabel === `${currentYear}년으로 돌아가기`,
+  );
+  assert.ok(shortcut);
+  assert.ok(
+    flatten(shortcut).some(
+      (node) => node.type === "Text" && node.props.children[0] === currentYear,
+    ),
+  );
+  shortcut.props.onPress();
+  assert.equal(changes.at(-1), currentYear);
+  assert.equal(
+    render(1000).find((node) => node.props?.accessibilityLabel === "이전 연도")
+      .props.disabled,
+    true,
+  );
+  assert.equal(
+    render(9999).find((node) => node.props?.accessibilityLabel === "다음 연도")
+      .props.disabled,
+    true,
+  );
+  assert.ok(
+    render(2026, true)
+      .filter((node) => node.type === "Pressable")
+      .every((node) => node.props.disabled),
+  );
 });

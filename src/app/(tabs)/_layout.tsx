@@ -23,6 +23,12 @@ const tabs: {
     activeIcon: "wallet",
   },
   {
+    name: "settlement",
+    title: "결산",
+    icon: "bar-chart-outline",
+    activeIcon: "bar-chart",
+  },
+  {
     name: "settings",
     title: "설정",
     icon: "settings-outline",

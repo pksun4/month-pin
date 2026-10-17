@@ -90,3 +90,23 @@ export interface CardBenefitInput {
   methodId: number;
   amount: number;
 }
+
+export interface AnnualMonthSummary {
+  month: string;
+  expenseTotal: number;
+  expenseCount: number;
+  pendingExpenses: number;
+  benefitTotal: number;
+  pendingBenefits: number;
+  benefitCount: number;
+}
+
+export interface AnnualSummary {
+  year: number;
+  months: AnnualMonthSummary[];
+}
+
+export interface YearEndTaxSettings {
+  year: number;
+  grossSalary: number | null;
+}

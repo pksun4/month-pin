@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { money } from "../utils/expenses";
-import { colors } from "./ui";
+import { colors, type IconName } from "./ui";
 
 export function ListTabs<Code extends string>({
   label,
@@ -84,6 +84,30 @@ export function RegisterButton({
   disabled?: boolean;
 }) {
   return (
+    <CompactActionButton
+      label="등록"
+      icon="add"
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      disabled={disabled}
+    />
+  );
+}
+
+export function CompactActionButton({
+  label,
+  icon,
+  accessibilityLabel,
+  onPress,
+  disabled = false,
+}: {
+  label: string;
+  icon: IconName;
+  accessibilityLabel: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -96,8 +120,13 @@ export function RegisterButton({
       ]}
     >
       <View style={styles.registerButton}>
-        <Ionicons name="add" size={14} color={colors.blue} />
-        <Text style={styles.registerLabel}>등록</Text>
+        <Ionicons
+          name={icon}
+          size={14}
+          color={colors.blue}
+          accessible={false}
+        />
+        <Text style={styles.registerLabel}>{label}</Text>
       </View>
     </Pressable>
   );
