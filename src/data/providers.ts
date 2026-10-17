@@ -68,6 +68,7 @@ export const BANK_PROVIDERS = [
     aliases: ["제일은행", "SC은행", "SC제일"],
   },
 ] as const;
+export type BankProviderCode = (typeof BANK_PROVIDERS)[number]["code"];
 export const CARD_PROVIDERS = [
   {
     code: "card_shinhan",

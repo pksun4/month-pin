@@ -3,6 +3,7 @@ import {
   migrateOhaCheckSpending,
 } from "./year-end-tax-cards";
 import type { SQLiteDatabase } from "expo-sqlite";
+import { INTEREST_INCOME_SCHEMA } from "./interest-income";
 import type {
   Expense,
   ExpenseInput,
@@ -129,7 +130,8 @@ export const SCHEMA = `
   ${YEAR_END_TAX_SCHEMA}
   ${YEAR_END_TAX_SPENDING_SCHEMA}
   ${YEAR_END_TAX_CARDS_SCHEMA}
-  PRAGMA user_version = 19;
+  ${INTEREST_INCOME_SCHEMA}
+  PRAGMA user_version = 20;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -255,7 +257,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 19)
+  if ((version?.user_version ?? 0) > 20)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -463,6 +465,12 @@ export async function initializeDatabase(db: SQLiteDatabase) {
             `ALTER TABLE monthly_tax_spending ADD COLUMN ${TAX_MONTH_CONFIRMED_COLUMN};`,
           );
         await db.execAsync("PRAGMA user_version = 19;");
+      });
+    }
+    if (version.user_version <= 19) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(INTEREST_INCOME_SCHEMA);
+        await db.execAsync("PRAGMA user_version = 20;");
       });
     }
     await db.withTransactionAsync(() => syncProviders(db));

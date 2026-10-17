@@ -14,6 +14,7 @@ import * as cardBenefitRepository from "../data/card-benefits";
 import * as annualRepository from "../data/annual-summary";
 import * as taxRepository from "../data/year-end-tax";
 import * as taxCardRepository from "../data/year-end-tax-cards";
+import * as interestRepository from "../data/interest-income";
 import type {
   Expense,
   ExpenseInput,
@@ -26,6 +27,8 @@ import type {
   AnnualSummary,
   YearEndTaxYear,
   YearEndTaxMonthInput,
+  InterestIncomeYear,
+  InterestIncomeMonthInput,
 } from "../data/models";
 
 interface Store {
@@ -58,6 +61,8 @@ interface Store {
   loadCardBenefitMonth: (month: string) => Promise<CardBenefitMonth>;
   loadAnnualSummary: (year: number) => Promise<AnnualSummary>;
   loadYearEndTaxYear: (year: number) => Promise<YearEndTaxYear>;
+  loadInterestIncomeYear: (year: number) => Promise<InterestIncomeYear>;
+  saveInterestIncomeMonth: (input: InterestIncomeMonthInput) => Promise<void>;
   saveYearEndTaxSalary: (year: number, grossSalary: number) => Promise<void>;
   saveYearEndTaxMonth: (entry: YearEndTaxMonthInput) => Promise<void>;
   saveYearEndTaxCards: (
@@ -139,6 +144,12 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     [db, runDatabase],
   );
 
+  const loadInterestIncomeYear = useCallback(
+    (year: number) =>
+      runDatabase(() => interestRepository.loadInterestIncomeYear(db, year)),
+    [db, runDatabase],
+  );
+
   useEffect(() => {
     void Promise.resolve()
       .then(refresh)
@@ -196,6 +207,9 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
         loadCardBenefitMonth,
         loadAnnualSummary,
         loadYearEndTaxYear,
+        loadInterestIncomeYear,
+        saveInterestIncomeMonth: (input) =>
+          mutate(() => interestRepository.saveInterestIncomeMonth(db, input)),
         saveYearEndTaxCards: (year, methodIds) =>
           mutate(() =>
             taxCardRepository.saveYearEndTaxCards(db, year, methodIds),

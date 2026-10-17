@@ -34,6 +34,7 @@ export function FormSelect<Code extends string | number | null>({
   placeholder = "선택해 주세요",
   disabled = false,
   inlineLabel = true,
+  labelWidth,
   required,
   error,
   hint,
@@ -47,6 +48,7 @@ export function FormSelect<Code extends string | number | null>({
   placeholder?: string;
   disabled?: boolean;
   inlineLabel?: boolean;
+  labelWidth?: number;
   required?: boolean;
   error?: string;
   hint?: string;
@@ -56,7 +58,8 @@ export function FormSelect<Code extends string | number | null>({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { fontScale } = useWindowDimensions();
-  const inline = inlineLabel && fontScale <= 1.4;
+  const flexibleLabel = labelWidth !== undefined;
+  const inline = inlineLabel && (flexibleLabel || fontScale <= 1.4);
   if (disabled && open) setOpen(false);
   const selected = options.find((option) => option.code === value);
   const search = query.trim().toLocaleLowerCase("ko-KR");
@@ -80,11 +83,21 @@ export function FormSelect<Code extends string | number | null>({
   }
   return (
     <View style={s.field}>
-      <View style={inline ? styles.inline : s.field}>
+      <View
+        style={
+          inline ? (flexibleLabel ? s.inlineField : styles.inline) : s.field
+        }
+      >
         <FieldLabel
           label={label}
           required={required}
-          style={inline ? { width: 96 * fontScale } : undefined}
+          style={
+            inline
+              ? flexibleLabel
+                ? [s.inlineFieldLabel, { flexBasis: labelWidth * fontScale }]
+                : { width: 96 * fontScale }
+              : undefined
+          }
         />
         <Pressable
           ref={controlRef}
@@ -100,7 +113,14 @@ export function FormSelect<Code extends string | number | null>({
           }}
           style={({ pressed }) => [
             s.compactInput,
-            inline && styles.inlineTrigger,
+            inline &&
+              (flexibleLabel
+                ? [
+                    s.inlineFieldControl,
+                    styles.alignedTrigger,
+                    { flexBasis: 180 * fontScale },
+                  ]
+                : styles.inlineTrigger),
             !!error && s.invalidInput,
             (pressed || disabled) && styles.dimmed,
           ]}
@@ -248,6 +268,7 @@ export function FormSelect<Code extends string | number | null>({
 }
 
 const styles = StyleSheet.create({
+  alignedTrigger: { minHeight: 48, borderRadius: 13 },
   inline: { flexDirection: "row", alignItems: "center", gap: 12 },
   inlineTrigger: { flex: 1 },
   value: { flex: 1, color: colors.ink, fontSize: 14, lineHeight: 22 },

@@ -1,4 +1,4 @@
-import type { ProviderCode } from "./providers";
+import type { BankProviderCode, ProviderCode } from "./providers";
 import type { TaxSpendingAmounts } from "./tax-spending-types";
 import type {
   CardBenefitTypeCode,
@@ -11,6 +11,34 @@ import type {
 } from "./expense-types";
 
 export type { MethodKind } from "./method-types";
+
+export interface InterestIncomeEntry {
+  id: number;
+  year: number;
+  month: number;
+  providerCode: BankProviderCode;
+  accountAlias: string;
+  amount: number;
+  sortOrder: number;
+}
+
+export interface InterestIncomeInput {
+  id: number | null;
+  providerCode: BankProviderCode;
+  accountAlias: string;
+  amount: number;
+}
+
+export interface InterestIncomeMonthInput {
+  year: number;
+  month: number;
+  entries: InterestIncomeInput[];
+}
+
+export interface InterestIncomeYear {
+  year: number;
+  entries: InterestIncomeEntry[];
+}
 
 export interface PaymentMethod {
   id: number;

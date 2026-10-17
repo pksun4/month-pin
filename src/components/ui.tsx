@@ -97,6 +97,9 @@ export type ButtonProps = {
   secondary?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  size?: "regular" | "small";
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 };
 
 export function Button({
@@ -106,30 +109,47 @@ export function Button({
   danger = false,
   disabled = false,
   inGroup = false,
+  size = "regular",
+  accessibilityLabel,
+  accessibilityHint,
 }: ButtonProps & { inGroup?: boolean }) {
+  const labelContent = (
+    <Text
+      style={[
+        s.buttonText,
+        size === "small" && s.smallButtonText,
+        secondary && { color: colors.muted },
+        danger && { color: colors.red },
+      ]}
+    >
+      {label}
+    </Text>
+  );
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       disabled={disabled}
       accessibilityState={{ disabled }}
       onPress={onPress}
       style={({ pressed }) => [
-        s.button,
-        secondary && s.secondary,
-        danger && s.danger,
+        size === "small" ? s.smallButtonTouch : s.button,
+        size !== "small" && secondary && s.secondary,
+        size !== "small" && danger && s.danger,
         inGroup && s.groupedButton,
         (pressed || disabled) && { opacity: 0.6 },
       ]}
     >
-      <Text
-        style={[
-          s.buttonText,
-          secondary && { color: colors.muted },
-          danger && { color: colors.red },
-        ]}
-      >
-        {label}
-      </Text>
+      {size === "small" ? (
+        <View
+          style={[s.smallButton, secondary && s.secondary, danger && s.danger]}
+        >
+          {labelContent}
+        </View>
+      ) : (
+        labelContent
+      )}
     </Pressable>
   );
 }
@@ -472,7 +492,9 @@ export function Field({
   label,
   labelLeading,
   inlineLabel = true,
+  labelWidth = 96,
   unit,
+  unitPlacement = "outside",
   value,
   onChangeText,
   placeholder,
@@ -488,7 +510,9 @@ export function Field({
   label: string;
   labelLeading?: ReactNode;
   inlineLabel?: boolean;
+  labelWidth?: number;
   unit?: string;
+  unitPlacement?: "inside" | "outside";
   value: string;
   onChangeText: (text: string) => void;
   placeholder: string;
@@ -503,19 +527,20 @@ export function Field({
 }) {
   const [focused, setFocused] = useState(false);
   const { fontScale } = useWindowDimensions();
+  const inline = inlineLabel;
   const inputLabel = `${label}${unit ? ` (${unit})` : ""}${required ? ", 필수" : ""}`;
   return (
     <View style={s.field}>
-      <View style={inlineLabel ? s.inlineField : s.field}>
+      <View style={inline ? s.inlineField : s.field}>
         <View
           style={
-            inlineLabel
-              ? [s.inlineFieldLabel, { flexBasis: 96 * fontScale }]
+            inline
+              ? [s.inlineFieldLabel, { flexBasis: labelWidth * fontScale }]
               : undefined
           }
         >
           {labelLeading ? (
-            <View style={[s.row, inlineLabel && s.inlineFieldLabelRow]}>
+            <View style={[s.row, inline && s.inlineFieldLabelRow]}>
               {labelLeading}
               <View style={s.flex}>
                 <FieldLabel label={label} required={required} />
@@ -528,15 +553,13 @@ export function Field({
         <View
           style={[
             s.fieldControl,
-            inlineLabel && [
-              s.inlineFieldControl,
-              { flexBasis: 180 * fontScale },
-            ],
+            inline && [s.inlineFieldControl, { flexBasis: 180 * fontScale }],
           ]}
         >
           <TextInput
             ref={controlRef}
             containerStyle={s.flex}
+            suffix={unitPlacement === "inside" ? unit : undefined}
             accessibilityLabel={inputLabel}
             accessibilityHint={error || hint}
             accessibilityState={{ disabled }}
@@ -546,8 +569,8 @@ export function Field({
             placeholderTextColor={colors.muted}
             style={[
               s.input,
-              inlineLabel && s.inlineFieldInput,
-              inlineLabel && numeric && s.inlineAmountInput,
+              inline && s.inlineFieldInput,
+              inline && numeric && s.inlineAmountInput,
               focused && { borderColor: colors.blue },
               !!error && s.invalidInput,
               disabled && { opacity: 0.6 },
@@ -563,7 +586,9 @@ export function Field({
             autoCorrect={false}
             returnKeyType="done"
           />
-          {unit && <Text style={s.fieldLabel}>{unit}</Text>}
+          {unit && unitPlacement === "outside" && (
+            <Text style={s.fieldLabel}>{unit}</Text>
+          )}
         </View>
       </View>
       <FieldMessage error={error} hint={hint} />
@@ -657,6 +682,22 @@ export const s = StyleSheet.create({
     maxWidth: "100%",
   },
   buttonText: { color: colors.blue, fontSize: 15, fontWeight: "700" },
+  smallButtonTouch: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  smallButton: {
+    minHeight: 28,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: colors.softBlue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  smallButtonText: { fontSize: 12, lineHeight: 18, fontWeight: "600" },
   textLink: {
     color: colors.blue,
     fontSize: 14,

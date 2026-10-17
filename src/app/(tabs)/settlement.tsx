@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { AnnualSummaryView } from "../../components/annual-summary-view";
+import { InterestIncomeView } from "../../components/interest-income-view";
 import { YearEndTaxView } from "../../components/year-end-tax-view";
 import { ListTabs } from "../../components/list-controls";
 import { Header, Screen, s } from "../../components/ui";
@@ -15,7 +16,7 @@ export default function SettlementScreen() {
   return (
     <Screen scrollable={false}>
       <View style={styles.header}>
-        <Header title="결산" description="한 해의 지출과 혜택을 돌아봐요" />
+        <Header title="결산" description="한 해의 지출과 수입을 돌아봐요" />
         <ListTabs
           label="결산 보기"
           options={SETTLEMENT_VIEWS}
@@ -34,6 +35,19 @@ export default function SettlementScreen() {
           year={year}
           onYearChange={setYear}
           active={view === "annual_summary"}
+        />
+      </View>
+      <View
+        style={[s.flex, view !== "interest_income" && styles.hidden]}
+        accessibilityElementsHidden={view !== "interest_income"}
+        importantForAccessibility={
+          view === "interest_income" ? "auto" : "no-hide-descendants"
+        }
+      >
+        <InterestIncomeView
+          year={year}
+          onYearChange={setYear}
+          active={view === "interest_income"}
         />
       </View>
       <View

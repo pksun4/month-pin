@@ -43,6 +43,8 @@ const annualRepository = loadTypeScript("src/data/annual-summary.ts");
 const annualDomain = loadTypeScript("src/utils/annual-summary.ts");
 const taxRepository = loadTypeScript("src/data/year-end-tax.ts");
 const taxDomain = loadTypeScript("src/utils/year-end-tax.ts");
+const interestRepository = loadTypeScript("src/data/interest-income.ts");
+const interestDomain = loadTypeScript("src/utils/interest-income.ts");
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -255,6 +257,13 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
     "../data/annual-summary": {
       loadAnnualSummary: async (db, year) => ({ year, months: [] }),
     },
+    "../data/interest-income": {
+      loadInterestIncomeYear: async (db, year) => ({ year, entries: [] }),
+      saveInterestIncomeMonth: async () => {
+        if (failWrite) throw new Error("Write failed");
+        writes++;
+      },
+    },
     "../data/year-end-tax-cards": { saveYearEndTaxCards: async () => {} },
     "../data/year-end-tax": {
       loadYearEndTaxYear: async (db, year) => ({
@@ -317,6 +326,13 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
   assert.deepEqual(await render().loadYearEndTaxYear(2026), {
     year: 2026,
     grossSalary: 40000000,
+  });
+  const beforeInterest = render().dataRevision;
+  await render().saveInterestIncomeMonth({ year: 2026, month: 1, entries: [] });
+  assert.equal(render().dataRevision, beforeInterest + 1);
+  assert.deepEqual(await render().loadInterestIncomeYear(2026), {
+    year: 2026,
+    entries: [],
   });
   const beforeMonthlyTax = render().dataRevision;
   await render().saveYearEndTaxMonth({ year: 2026, month: 1, amounts: {} });
@@ -900,7 +916,7 @@ test("v8 upgrade preserves every monthly record, marks actual zero and retries a
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(
       await ledgerRepository.readLedgerMonth(db, ledgerDomain.monthKey()),
@@ -1273,7 +1289,7 @@ test("v7 ledger migration rolls back failures and preserves existing records and
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readExpenses(db), expenses);
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -2173,7 +2189,7 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
 
     db.sqlite.close();
@@ -2263,7 +2279,7 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -2756,7 +2772,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -2929,7 +2945,7 @@ test("v4 order upgrade preserves types, amounts and links; partial migration rol
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     const expenses = await repository.readExpenses(db);
     assert.deepEqual(
@@ -3116,7 +3132,7 @@ test("v5 category migration preserves IDs, amounts, links, custom order and dele
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -3291,7 +3307,7 @@ test("v3 amount type migration preserves data, links and deleted IDs; a failure 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -3587,7 +3603,7 @@ test("v10 migration converts date settings to monthly latest values atomically w
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.equal((await repository.readExpenses(db))[0].startMonth, "1000-01");
     assert.deepEqual(
@@ -4094,7 +4110,7 @@ test("v11 migration preserves retired card totals and calendar history, rolls ba
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readExpenses(db, "ended"), ended);
     assert.deepEqual(
@@ -4793,7 +4809,7 @@ test("v12 benefit migration preserves data and references, rolls back failures, 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(
       await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
@@ -5451,7 +5467,7 @@ test("v13 settlement migration preserves legacy data, rolls back and retries, an
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -6053,7 +6069,7 @@ test("v14 benefit history migration preserves confirmations and unvisited estima
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(
@@ -6358,7 +6374,7 @@ test("annual summary matches all twelve calendars, keeps actual zero and confirm
     );
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
   } finally {
@@ -6531,6 +6547,7 @@ test("settlement starts with annual summary and switches views without discardin
       StyleSheet: { create: (styles) => styles },
     },
     "../../components/annual-summary-view": { AnnualSummaryView: "Annual" },
+    "../../components/interest-income-view": { InterestIncomeView: "Interest" },
     "../../components/year-end-tax-view": { YearEndTaxView: "Tax" },
     "../../components/list-controls": { ListTabs: "Tabs" },
     "../../components/ui": {
@@ -6568,7 +6585,7 @@ test("settlement starts with annual summary and switches views without discardin
   const options = nodes.find((node) => node.type === "Tabs").props.options;
   assert.deepEqual(
     options.map((option) => option.label),
-    ["고정비", "연말정산"],
+    ["고정비", "이자", "연말정산"],
   );
   nodes.find((node) => node.type === "Tabs").props.onChange("year_end_tax");
   nodes = render();
@@ -6611,6 +6628,38 @@ test("settlement starts with annual summary and switches views without discardin
   );
   assert.equal(
     render().find((node) => node.type === "Annual").props.active,
+    true,
+  );
+  nodes = render();
+  nodes.find((node) => node.type === "Tabs").props.onChange("interest_income");
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Interest").props.year,
+    taxYear,
+  );
+  assert.equal(
+    nodes.find((node) => node.type === "Annual").props.active,
+    false,
+  );
+  assert.equal(nodes.find((node) => node.type === "Tax").props.active, false);
+  assert.equal(
+    nodes.find((node) => node.props?.children?.type === "Interest").props
+      .accessibilityElementsHidden,
+    false,
+  );
+  nodes
+    .find((node) => node.type === "Interest")
+    .props.onYearChange(taxYear - 1);
+  nodes = render();
+  nodes.find((node) => node.type === "Tabs").props.onChange("year_end_tax");
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Tax").props.year,
+    taxYear - 1,
+  );
+  assert.equal(
+    nodes.find((node) => node.props?.children?.type === "Interest").props
+      .accessibilityElementsHidden,
     true,
   );
 });
@@ -6846,7 +6895,7 @@ test("tax salary is separate by year, editable, persists after reopening, and va
     );
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
   } finally {
     db.sqlite.close();
@@ -6905,7 +6954,7 @@ test("v15 tax migration preserves existing records, rolls back a failed migratio
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(
       await Promise.all(
@@ -7095,6 +7144,7 @@ test("tax view keeps its target card during loading, hides stale values and rese
     "./typography": { AppText: "Text" },
     "./ui": { Button: "Button", FormModal: "Modal", s: {}, colors: {} },
     "./year-end-salary-form": { YearEndSalaryForm: "SalaryForm" },
+    "./settlement-month-styles": { settlementMonthStyles: {} },
     "./year-end-tax-guide": { YearEndTaxGuide: "TaxGuide" },
     "./year-end-spending-form": { YearEndSpendingForm: "SpendingForm" },
     "./year-end-card-selection-form": {
@@ -7720,7 +7770,7 @@ test("v16 monthly tax migration preserves salary and existing history, rolls bac
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await read(), before);
     assert.deepEqual(await taxRepository.loadYearEndTaxYear(db, 2026), {
@@ -8166,7 +8216,7 @@ test("v18 tax confirmation migration preserves existing records as drafts, rolls
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      19,
+      20,
     );
     assert.deepEqual(await read(), before);
     const rows = await db.getAllAsync(
@@ -8659,4 +8709,747 @@ test("yearly card selection uses saved IDs, excludes banks and untyped cards, an
   finish();
   await settle();
   assert.equal(closed, 1);
+});
+
+test("interest income keeps row IDs, aliases, zero, months and years distinct and persists edits and deletions atomically", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monthpin-interest-"));
+  const path = join(directory, "interest.db");
+  let db = sqliteAdapter(path);
+  const item = (accountAlias, amount, providerCode = "bank_woori") => ({
+    id: null,
+    providerCode,
+    accountAlias,
+    amount,
+  });
+  try {
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      await interestRepository.loadInterestIncomeYear(db, 2026),
+      { year: 2026, entries: [] },
+    );
+    await interestRepository.saveInterestIncomeMonth(db, {
+      year: 2026,
+      month: 1,
+      entries: [
+        item("  비상금  ", 100),
+        item("비상금", 200),
+        item("", 0, "bank_kb"),
+      ],
+    });
+    await interestRepository.saveInterestIncomeMonth(db, {
+      year: 2026,
+      month: 2,
+      entries: [item("적금", 50)],
+    });
+    await interestRepository.saveInterestIncomeMonth(db, {
+      year: 2025,
+      month: 1,
+      entries: [item("예금", 40)],
+    });
+    let loaded = await interestRepository.loadInterestIncomeYear(db, 2026);
+    assert.equal(
+      loaded.entries.reduce((sum, entry) => sum + entry.amount, 0),
+      350,
+    );
+    const january = loaded.entries.filter((entry) => entry.month === 1);
+    const february = loaded.entries.filter((entry) => entry.month === 2);
+    assert.equal(new Set(january.map((entry) => entry.id)).size, 3);
+    assert.deepEqual(
+      january.map((entry) => entry.accountAlias),
+      ["비상금", "비상금", ""],
+    );
+    assert.equal(january[2].amount, 0);
+    for (const entries of [
+      [{ ...january[0], providerCode: "card_shinhan" }],
+      [{ ...january[0], accountAlias: "x".repeat(41) }],
+      [{ ...january[0], accountAlias: null }],
+      [{ ...january[0], amount: -1 }],
+      [{ ...january[0], amount: 0.5 }],
+      [{ ...january[0], amount: 10000000000 }],
+      [{ ...january[0], amount: "100" }],
+      [{ ...january[0], id: undefined }],
+      [january[0], january[0]],
+      [february[0]],
+      null,
+    ])
+      await assert.rejects(
+        interestRepository.saveInterestIncomeMonth(db, {
+          year: 2026,
+          month: 1,
+          entries,
+        }),
+      );
+    for (const [year, month] of [
+      [999, 1],
+      [2026, 13],
+      [2026, 0],
+      [2026, 1.5],
+    ])
+      await assert.rejects(
+        interestRepository.saveInterestIncomeMonth(db, {
+          year,
+          month,
+          entries: [],
+        }),
+      );
+    for (const patch of [
+      "amount = -1",
+      "amount = 0.5",
+      "amount = 10000000000",
+      "month = 13",
+      "year = 999",
+      "providerCode = 'card_shinhan'",
+      "providerCode = 'unknown'",
+      "providerKind = 'card'",
+      "sortOrder = -1",
+      "accountAlias = '" + "x".repeat(41) + "'",
+    ])
+      await assert.rejects(
+        db.execAsync(
+          `UPDATE interest_income_entries SET ${patch} WHERE id = ${january[0].id}`,
+        ),
+      );
+    assert.deepEqual(
+      await interestRepository.loadInterestIncomeYear(db, 2026),
+      loaded,
+    );
+    await db.execAsync(
+      "CREATE TRIGGER fail_interest BEFORE INSERT ON interest_income_entries WHEN NEW.amount = 777 BEGIN SELECT RAISE(ABORT, 'interest write failure'); END;",
+    );
+    await assert.rejects(
+      interestRepository.saveInterestIncomeMonth(db, {
+        year: 2026,
+        month: 1,
+        entries: [{ ...january[0], amount: 999 }, item("new", 777)],
+      }),
+      /interest write failure/,
+    );
+    assert.deepEqual(
+      await interestRepository.loadInterestIncomeYear(db, 2026),
+      loaded,
+    );
+    await db.execAsync("DROP TRIGGER fail_interest;");
+    await interestRepository.saveInterestIncomeMonth(db, {
+      year: 2026,
+      month: 1,
+      entries: [
+        january[2],
+        { ...january[0], accountAlias: "수정한 계좌", amount: 300 },
+      ],
+    });
+    loaded = await interestRepository.loadInterestIncomeYear(db, 2026);
+    assert.deepEqual(
+      loaded.entries.slice(0, 2).map((entry) => entry.id),
+      [january[2].id, january[0].id],
+    );
+    assert.deepEqual(
+      loaded.entries.slice(0, 2).map((entry) => entry.sortOrder),
+      [0, 1],
+    );
+    assert.deepEqual(
+      loaded.entries.filter((entry) => entry.month === 2),
+      february,
+    );
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    assert.deepEqual(
+      await interestRepository.loadInterestIncomeYear(db, 2026),
+      loaded,
+    );
+    assert.equal(
+      (await interestRepository.loadInterestIncomeYear(db, 2025)).entries[0]
+        .amount,
+      40,
+    );
+    await interestRepository.saveInterestIncomeMonth(db, {
+      year: 2026,
+      month: 1,
+      entries: [],
+    });
+    assert.deepEqual(
+      (await interestRepository.loadInterestIncomeYear(db, 2026)).entries,
+      february,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("v19 interest migration preserves existing data, rolls back table creation and retries idempotently", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await seedSettlementCards(db);
+    await repository.saveExpense(db, insuranceInput);
+    await ledgerRepository.loadLedgerMonth(db, "2026-01");
+    await taxRepository.saveYearEndTaxSalary(db, 2026, 40000000);
+    await taxRepository.saveYearEndTaxMonth(db, {
+      year: 2026,
+      month: 1,
+      amounts: taxAmounts({ cash_receipt: 123 }),
+      confirmed: true,
+    });
+    const tables = [
+      "payment_methods",
+      "expenses",
+      "ledger_entries",
+      "expense_amount_versions",
+      "card_benefit_versions",
+      "monthly_card_benefits",
+      "annual_tax_settings",
+      "monthly_tax_spending",
+      "monthly_tax_cards",
+      "annual_tax_cards",
+    ];
+    const read = () =>
+      Promise.all(
+        tables.map((table) =>
+          db.getAllAsync(`SELECT * FROM ${table} ORDER BY rowid`),
+        ),
+      );
+    const before = await read();
+    await db.execAsync(
+      "DROP TABLE interest_income_entries; PRAGMA user_version = 19;",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 20;")
+        throw new Error("interest migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /interest migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      19,
+    );
+    assert.equal(
+      await db.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'interest_income_entries'",
+      ),
+      undefined,
+    );
+    assert.deepEqual(await read(), before);
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      20,
+    );
+    assert.deepEqual(await read(), before);
+    assert.deepEqual(
+      await interestRepository.loadInterestIncomeYear(db, 2026),
+      { year: 2026, entries: [] },
+    );
+  } finally {
+    db.sqlite.close();
+  }
+});
+
+test("interest year reads reject late results and revisions, pause offscreen and retry failures", async () => {
+  const requests = [];
+  const store = {
+    busy: false,
+    dataRevision: 0,
+    loadInterestIncomeYear: (year) =>
+      new Promise((resolve, reject) =>
+        requests.push({ year, resolve, reject }),
+      ),
+  };
+  const runtime = hookRuntime("src/hooks/use-interest-income-year.ts", {
+    "./use-month-pin": { useMonthPin: () => store },
+  });
+  const render = (year = 2026, active = true) =>
+    runtime.render(({ useInterestIncomeYear }) =>
+      useInterestIncomeYear(year, active),
+    );
+  render();
+  runtime.flush();
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  requests[1].resolve({ year: 2025, entries: [{ amount: 200 }] });
+  await settle();
+  requests[0].resolve({ year: 2026, entries: [{ amount: 100 }] });
+  await settle();
+  assert.equal(render(2025).snapshot.entries[0].amount, 200);
+  store.dataRevision++;
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  requests[2].reject(new Error("failed"));
+  await settle();
+  assert.ok(render(2025).error);
+  render(2025).retry();
+  render(2025);
+  runtime.flush();
+  render(2025, false);
+  runtime.flush();
+  requests[3].resolve({ year: 2025, entries: [] });
+  await settle();
+  assert.equal(render(2025, false).snapshot, null);
+  assert.equal(render(2025, false).loading, false);
+  render(2025);
+  runtime.flush();
+  requests[4].resolve({ year: 2025, entries: [] });
+  await settle();
+  store.busy = true;
+  assert.equal(render(2025).snapshot, null);
+  runtime.flush();
+  store.busy = false;
+  render(2025);
+  runtime.flush();
+  requests[5].resolve({ year: 2025, entries: [{ amount: 300 }] });
+  await settle();
+  assert.equal(render(2025).snapshot.entries[0].amount, 300);
+});
+
+test("interest form preserves rows while adding, edits and removes by ID, validates, and retains values after failed saves", async () => {
+  const saves = [];
+  let fail = true;
+  let finish;
+  let closed = 0;
+  let busy = false;
+  const runtime = hookRuntime("src/components/interest-income-form.tsx", {
+    "react-native": {
+      View: "View",
+      Pressable: "Pressable",
+      StyleSheet: { create: (styles) => styles },
+      useWindowDimensions: () => ({ width: 393, fontScale: 1 }),
+    },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "../data/providers": loadTypeScript("src/data/providers.ts"),
+    "../utils/expenses": domain,
+    "../utils/interest-income": interestDomain,
+    "../hooks/use-month-pin": {
+      useMonthPin: () => ({
+        busy,
+        saveInterestIncomeMonth: async (input) => {
+          saves.push(input);
+          if (fail) throw new Error("저장 실패");
+          await new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      }),
+    },
+    "./typography": { AppText: "Text" },
+    "./ui": {
+      Button: "Button",
+      Field: "Field",
+      FieldMessage: "Message",
+      colors: {},
+      useFormNavigation: () => null,
+    },
+    "./form-select": { FormSelect: "Select" },
+    "./provider-icon": { ProviderIcon: "ProviderIcon" },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const entries = [
+    {
+      id: 11,
+      year: 2026,
+      month: 1,
+      providerCode: "bank_woori",
+      accountAlias: "비상금",
+      amount: 123,
+      sortOrder: 0,
+    },
+  ];
+  const render = () =>
+    flatten(
+      runtime.render(({ InterestIncomeForm }) =>
+        InterestIncomeForm({
+          year: 2026,
+          month: 1,
+          entries,
+          onClose: () => closed++,
+        }),
+      ),
+    );
+  const fields = (label) =>
+    render()
+      .filter((node) => node.type === "Field" && node.props.label === label)
+      .map((node) => node.props);
+  const banks = () =>
+    render()
+      .filter((node) => node.type === "Select")
+      .map((node) => node.props);
+  const add = () =>
+    render()
+      .find(
+        (node) =>
+          node.type === "Button" && node.props.label === "+ 이자 내역 추가",
+      )
+      .props.onPress();
+  const save = () =>
+    render()
+      .find(
+        (node) => node.type === "Button" && node.props.label.startsWith("저장"),
+      )
+      .props.onPress();
+  assert.equal(fields("통장 별명")[0].value, "비상금");
+  assert.ok(
+    banks()[0].options.every((option) => option.code.startsWith("bank_")),
+  );
+  add();
+  assert.equal(fields("이자 수입")[0].value, "123");
+  assert.equal(fields("이자 수입").length, 2);
+  assert.ok(
+    render().some((node) => node.props?.accessibilityLabel === "합계 123원"),
+  );
+  save();
+  await settle();
+  assert.equal(saves.length, 0);
+  assert.ok(banks()[1].error);
+  banks()[1].onChange("bank_woori");
+  fields("통장 별명")[1].onChangeText("  적금  ");
+  fields("이자 수입")[1].onChangeText("1000");
+  assert.equal(fields("이자 수입")[1].value, "1,000");
+  assert.ok(
+    render().some((node) => node.props?.accessibilityLabel === "합계 1,123원"),
+  );
+  save();
+  await settle();
+  assert.equal(closed, 0);
+  assert.equal(
+    render().find((node) => node.type === "Message").props.error,
+    "저장 실패",
+  );
+  assert.equal(fields("이자 수입")[1].value, "1,000");
+  assert.deepEqual(saves[0].entries, [
+    { id: 11, providerCode: "bank_woori", accountAlias: "비상금", amount: 123 },
+    {
+      id: null,
+      providerCode: "bank_woori",
+      accountAlias: "적금",
+      amount: 1000,
+    },
+  ]);
+  fail = false;
+  save();
+  save();
+  add();
+  assert.equal(saves.length, 2);
+  assert.equal(fields("이자 수입").length, 2);
+  finish();
+  await settle();
+  assert.equal(closed, 1);
+  render()
+    .find((node) => node.props?.accessibilityLabel === "1번째 이자 내역 삭제")
+    .props.onPress();
+  assert.equal(fields("통장 별명")[0].value, "  적금  ");
+  fields("이자 수입")[0].onChangeText("");
+  assert.ok(
+    render().some((node) => node.props?.accessibilityLabel === "합계 0원"),
+  );
+  save();
+  await settle();
+  assert.equal(saves.length, 2);
+  assert.ok(fields("이자 수입")[0].error);
+  fields("이자 수입")[0].onChangeText("0");
+  save();
+  assert.equal(saves.at(-1).entries[0].amount, 0);
+  assert.equal(saves.at(-1).entries[0].id, null);
+  finish();
+  await settle();
+  render()
+    .find((node) => node.props?.accessibilityLabel === "1번째 이자 내역 삭제")
+    .props.onPress();
+  save();
+  assert.deepEqual(saves.at(-1).entries, []);
+  finish();
+  await settle();
+  busy = true;
+  const previousSaves = saves.length;
+  add();
+  save();
+  assert.equal(fields("이자 수입").length, 0);
+  assert.equal(saves.length, previousSaves);
+});
+
+test("interest screen displays monthly and annual totals, reopens saved rows and hides stale data while changing years", () => {
+  let busy = false;
+  let retries = 0;
+  let state = {
+    snapshot: {
+      year: 2026,
+      entries: [
+        {
+          id: 11,
+          year: 2026,
+          month: 1,
+          providerCode: "bank_woori",
+          accountAlias: "비상금",
+          amount: 100,
+          sortOrder: 0,
+        },
+        {
+          id: 12,
+          year: 2026,
+          month: 1,
+          providerCode: "bank_woori",
+          accountAlias: "적금",
+          amount: 200,
+          sortOrder: 1,
+        },
+        {
+          id: 13,
+          year: 2026,
+          month: 2,
+          providerCode: "bank_kb",
+          accountAlias: "",
+          amount: 0,
+          sortOrder: 0,
+        },
+      ],
+    },
+    loading: false,
+    error: null,
+  };
+  const runtime = hookRuntime("src/components/interest-income-view.tsx", {
+    "react-native": {
+      View: "View",
+      ScrollView: "ScrollView",
+      Pressable: "Pressable",
+      StyleSheet: { create: (styles) => styles },
+    },
+    "../hooks/use-month-pin": { useMonthPin: () => ({ busy }) },
+    "../hooks/use-interest-income-year": {
+      useInterestIncomeYear: () => ({ ...state, retry: () => retries++ }),
+    },
+    "../utils/expenses": domain,
+    "./typography": { AppText: "Text" },
+    "./ui": { Button: "Button", FormModal: "Modal", s: {}, colors: {} },
+    "./interest-income-form": { InterestIncomeForm: "Form" },
+    "./interest-income-row": { InterestIncomeRow: "IncomeRow" },
+    "./year-selector": { YearSelector: "YearSelector" },
+    "./settlement-month-styles": { settlementMonthStyles: {} },
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  const render = (year = 2026, active = true) =>
+    flatten(
+      runtime.render(({ InterestIncomeView }) =>
+        InterestIncomeView({ year, active, onYearChange: () => {} }),
+      ),
+    );
+  state.snapshot.entries.reverse();
+  const savedOrder = state.snapshot.entries.map((entry) => entry.id);
+  let nodes = render();
+  const listed = nodes.filter((node) => node.type === "IncomeRow");
+  assert.deepEqual(
+    listed.map((node) => node.props.entry.id),
+    [11, 12, 13],
+  );
+  assert.deepEqual(
+    listed.map((node) => node.props.dateLabel),
+    ["1월", "1월", "2월"],
+  );
+  assert.deepEqual(
+    state.snapshot.entries.map((entry) => entry.id),
+    savedOrder,
+  );
+  listed[1].props.onPress();
+  assert.deepEqual(
+    render()
+      .find((node) => node.type === "Form")
+      .props.entries.map((entry) => entry.id),
+    [11, 12],
+  );
+  render()
+    .find((node) => node.type === "Form")
+    .props.onClose();
+  assert.equal(
+    nodes.find(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 연간 이자 수입 300원",
+    ).props.children,
+    "300원",
+  );
+  assert.ok(
+    nodes.some(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 2월 이자 수입 0원, 수정",
+    ),
+  );
+  assert.ok(
+    nodes.some(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 3월 이자 수입 미입력, 입력",
+    ),
+  );
+  nodes
+    .find(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 1월 이자 수입 300원, 수정",
+    )
+    .props.onPress();
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Modal").props.title,
+    "2026년 1월 이자 수입",
+  );
+  assert.equal(
+    nodes.find((node) => node.type === "Modal").props.presentation,
+    "dialog",
+  );
+  const form = nodes.find((node) => node.type === "Form").props;
+  assert.deepEqual(
+    form.entries.map((entry) => entry.id),
+    [11, 12],
+  );
+  form.onClose();
+  assert.ok(!render().some((node) => node.type === "Modal"));
+  state.snapshot.entries.find((entry) => entry.id === 11).amount = 150;
+  nodes = render();
+  assert.ok(
+    nodes.some(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 연간 이자 수입 350원",
+    ),
+  );
+  nodes
+    .find(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 1월 이자 수입 350원, 수정",
+    )
+    .props.onPress();
+  state = { snapshot: null, loading: true, error: null };
+  nodes = render(2025);
+  assert.ok(!nodes.some((node) => node.type === "IncomeRow"));
+  assert.ok(!nodes.some((node) => node.type === "Modal"));
+  assert.equal(
+    nodes.find(
+      (node) =>
+        node.props?.accessibilityLabel === "2025년 연간 이자 수입 조회 전",
+    ).props.children,
+    "—",
+  );
+  const pending = nodes.find(
+    (node) => node.props?.accessibilityLabel === "2025년 1월 이자 수입 조회 전",
+  );
+  assert.equal(pending.props.disabled, true);
+  pending.props.onPress();
+  assert.ok(!render(2025).some((node) => node.type === "Modal"));
+  state = {
+    snapshot: { year: 2025, entries: [] },
+    loading: false,
+    error: null,
+  };
+  assert.ok(!render(2025).some((node) => node.type === "Modal"));
+  assert.ok(
+    render(2025).some(
+      (node) => node.props?.accessibilityLabel === "2025년 연간 이자 수입 0원",
+    ),
+  );
+  render(2025)
+    .find(
+      (node) =>
+        node.props?.accessibilityLabel === "2025년 1월 이자 수입 미입력, 입력",
+    )
+    .props.onPress();
+  assert.ok(render(2025).some((node) => node.type === "Modal"));
+  render(2025, false);
+  assert.ok(!render(2025).some((node) => node.type === "Modal"));
+  state = { snapshot: null, loading: false, error: "조회 실패" };
+  nodes = render(2025);
+  nodes.find((node) => node.type === "Button").props.onPress();
+  assert.equal(retries, 1);
+  assert.equal(nodes.filter((node) => node.type === "Pressable").length, 12);
+});
+
+test("input suffix stays separate from the value while clearing and respects disabled inputs", () => {
+  const flattenStyle = (style) =>
+    Object.assign(
+      {},
+      ...(Array.isArray(style) ? style.flat(Infinity) : [style]).filter(
+        Boolean,
+      ),
+    );
+  const runtime = hookRuntime("src/components/typography.tsx", {
+    "react-native": {
+      View: "View",
+      Text: "Text",
+      TextInput: "Input",
+      Pressable: "Pressable",
+      StyleSheet: { create: (styles) => styles, flatten: flattenStyle },
+    },
+    "expo-font": { isLoaded: () => false },
+    "@expo/vector-icons/Ionicons": "Icon",
+    "./theme": loadTypeScript("src/components/theme.ts"),
+    ...Object.fromEntries(
+      ["Regular", "Medium", "SemiBold", "Bold", "ExtraBold"].map((weight) => [
+        `../../assets/fonts/Pretendard-${weight}.otf`,
+        1,
+      ]),
+    ),
+  });
+  const flatten = (node) =>
+    Array.isArray(node)
+      ? node.flatMap(flatten)
+      : node && typeof node === "object"
+        ? [node, ...flatten(node.props?.children)]
+        : [];
+  let value = "12,000";
+  let focuses = 0;
+  const render = (editable = true) =>
+    flatten(
+      runtime.render(({ AppTextInput }) =>
+        AppTextInput.render(
+          {
+            value,
+            suffix: "원",
+            accessibilityLabel: "이자 수입 (원)",
+            onChangeText: (next) => {
+              value = next;
+            },
+            editable,
+            style: { fontSize: 14, paddingHorizontal: 10 },
+          },
+          null,
+        ),
+      ),
+    );
+  const initial = render();
+  const input = initial.find((node) => node.type === "Input");
+  assert.equal(input.props.value, "12,000");
+  input.props.ref({ focus: () => focuses++ });
+  initial
+    .find((node) => node.props?.onLayout)
+    .props.onLayout({ nativeEvent: { layout: { width: 18 } } });
+  assert.ok(
+    flattenStyle(render().find((node) => node.type === "Input").props.style)
+      .paddingRight >=
+      44 + 18,
+  );
+  initial
+    .find((node) => node.props?.accessibilityLabel === "이자 수입 (원) 지우기")
+    .props.onPress();
+  assert.equal(value, "");
+  assert.equal(focuses, 1);
+  assert.ok(render().some((node) => node.props?.children === "원"));
+  assert.equal(render().filter((node) => node.type === "Pressable").length, 0);
+  value = "100";
+  assert.equal(
+    render(false).filter((node) => node.type === "Pressable").length,
+    0,
+  );
+  assert.equal(
+    render(false).find((node) => node.type === "Input").props.value,
+    "100",
+  );
 });

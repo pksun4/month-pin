@@ -61,6 +61,7 @@ export const AppText = forwardRef<NativeText, TextProps>(function AppText(
 export type AppTextInputProps = TextInputProps & {
   clearable?: boolean;
   containerStyle?: StyleProp<ViewStyle>;
+  suffix?: string;
 };
 
 export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
@@ -74,12 +75,14 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
       defaultValue,
       onChangeText,
       clearButtonMode,
+      suffix,
       ...props
     },
     ref,
   ) {
     const inputRef = useRef<NativeTextInput | null>(null);
     const [draft, setDraft] = useState(defaultValue ?? "");
+    const [suffixWidth, setSuffixWidth] = useState(0);
     const setInputRef = useCallback(
       (input: NativeTextInput | null) => {
         inputRef.current = input;
@@ -110,6 +113,9 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
       flattened?.padding ??
       0;
     const label = props.accessibilityLabel ?? props.placeholder ?? "입력 내용";
+    const trailingSpace = canClear
+      ? Math.max(Number(endPadding) || 0, 44)
+      : Number(endPadding) || 0;
 
     return (
       <View style={[inputStyles.container, containerStyle]}>
@@ -127,10 +133,36 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
           style={[
             inputStyles.input,
             style,
-            canClear && { paddingRight: Math.max(Number(endPadding) || 0, 44) },
+            (canClear || suffix) && {
+              paddingRight:
+                trailingSpace +
+                (suffix
+                  ? (suffixWidth ||
+                      (Number(flattened?.fontSize) || 16) * suffix.length) + 4
+                  : 0),
+            },
             fontForStyle(style),
           ]}
         />
+        {suffix && (
+          <View
+            pointerEvents="none"
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            onLayout={(event) => setSuffixWidth(event.nativeEvent.layout.width)}
+            style={[inputStyles.suffix, { right: trailingSpace }]}
+          >
+            <AppText
+              style={[
+                inputStyles.suffixText,
+                { fontSize: flattened?.fontSize ?? 16 },
+              ]}
+            >
+              {suffix}
+            </AppText>
+          </View>
+        )}
         {canClear && hasValue && (
           <Pressable
             accessibilityRole="button"
@@ -166,6 +198,13 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
 const inputStyles = StyleSheet.create({
   container: { flexDirection: "row", alignItems: "center", minWidth: 0 },
   input: { flex: 1, minWidth: 0 },
+  suffix: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+  },
+  suffixText: { color: colors.ink },
   clear: {
     position: "absolute",
     right: 0,

@@ -9,6 +9,7 @@ import { YearEndSpendingForm } from "./year-end-spending-form";
 import { YearEndCardSelectionForm } from "./year-end-card-selection-form";
 import { YearSelector } from "./year-selector";
 import { CompactActionButton } from "./list-controls";
+import { settlementMonthStyles as monthStyles } from "./settlement-month-styles";
 import { useYearEndTax } from "../hooks/use-year-end-tax";
 import { useMonthPin } from "../hooks/use-month-pin";
 import type {
@@ -151,7 +152,7 @@ export function YearEndTaxView({
             <Button label="다시 시도" secondary onPress={retry} />
           </View>
         )}
-        <View style={styles.monthSection}>
+        <View style={monthStyles.section}>
           <YearSelector
             year={year}
             onChange={onYearChange}
@@ -177,9 +178,9 @@ export function YearEndTaxView({
               />
             }
           />
-          <View style={styles.months}>
+          <View style={monthStyles.grid}>
             {Array.from({ length: 4 }, (_, row) => (
-              <View key={row} style={styles.monthRow}>
+              <View key={row} style={monthStyles.row}>
                 {Array.from({ length: 3 }, (_, column) => {
                   const month = row * 3 + column + 1;
                   const entry = snapshot?.months.find(
@@ -207,17 +208,17 @@ export function YearEndTaxView({
                         });
                       }}
                       style={({ pressed }) => [
-                        styles.monthCell,
+                        monthStyles.cell,
                         confirmed && styles.monthConfirmed,
                         (pressed || busy) && styles.dimmed,
                       ]}
                     >
-                      <Text style={styles.monthLabel}>{month}월</Text>
+                      <Text style={monthStyles.label}>{month}월</Text>
                       <Text
                         numberOfLines={1}
                         adjustsFontSizeToFit
                         style={[
-                          styles.monthAmount,
+                          monthStyles.amount,
                           amount !== null && styles.monthEntered,
                         ]}
                       >
@@ -293,6 +294,7 @@ export function YearEndTaxView({
 const styles = StyleSheet.create({
   page: { paddingTop: 20, paddingBottom: 12, gap: 16 },
   target: {
+    minHeight: 124,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingTop: 12,
@@ -338,36 +340,7 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   salaryAction: { flexShrink: 0 },
-  monthSection: { gap: 8 },
-  months: { gap: 8 },
-  monthRow: { flexDirection: "row", gap: 8 },
-  monthCell: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 80,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: 11,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "transparent",
-  },
-  monthLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "500",
-  },
   monthConfirmed: { borderColor: colors.blueLine },
-  monthAmount: {
-    maxWidth: "100%",
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 20,
-    fontVariant: ["tabular-nums"],
-  },
   monthEntered: { color: colors.ink, fontWeight: "700" },
   dimmed: { opacity: 0.6 },
 });
