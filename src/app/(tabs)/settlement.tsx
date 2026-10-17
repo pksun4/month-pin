@@ -44,7 +44,6 @@ export default function SettlementScreen() {
         }
       >
         <YearEndTaxView
-          key={year}
           year={year}
           onYearChange={setYear}
           active={view === "year_end_tax"}

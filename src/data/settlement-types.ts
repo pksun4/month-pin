@@ -1,5 +1,5 @@
 export const SETTLEMENT_VIEWS = [
-  { code: "annual_summary", label: "연간 요약" },
+  { code: "annual_summary", label: "고정비" },
   { code: "year_end_tax", label: "연말정산" },
 ] as const;
 

@@ -32,7 +32,7 @@ export function FormSegments<Code extends string>({
         <FieldLabel
           label={label}
           required={required}
-          style={!stacked ? { width: 68 * fontScale } : undefined}
+          style={!stacked ? { width: 96 * fontScale } : undefined}
         />
         <View
           accessibilityRole="radiogroup"

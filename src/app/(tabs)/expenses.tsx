@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { View } from "react-native";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ExpenseListView } from "../../components/expense-list-view";
 import { ExpenseCalendarView } from "../../components/expense-calendar-view";
 import { ExpenseViewButton } from "../../components/expense-view-button";
@@ -8,7 +9,22 @@ import type { ExpenseViewCode } from "../../data/expense-types";
 import { useMonthPin } from "../../hooks/use-month-pin";
 
 export default function ExpensesScreen() {
-  const [view, setView] = useState<ExpenseViewCode>("calendar");
+  const { view: requestedView } = useLocalSearchParams<{
+    view?: string | string[];
+  }>();
+  const [selectedView, setView] = useState<ExpenseViewCode>("calendar");
+  const openList =
+    (Array.isArray(requestedView) ? requestedView[0] : requestedView) ===
+    "list";
+  const view = openList ? "list" : selectedView;
+  useFocusEffect(
+    useCallback(() => {
+      if (!openList) return;
+      setView("list");
+      // Consume this navigation request so later tab visits retain the user's view.
+      router.setParams({ view: undefined });
+    }, [openList]),
+  );
   const { busy } = useMonthPin();
   const switcher = (
     <ExpenseViewButton value={view} disabled={busy} onChange={setView} />

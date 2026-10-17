@@ -164,6 +164,7 @@ export function ExpenseForm({
         onChangeText={setName}
         placeholder="예: 월세, 넷플릭스, 휴대폰 요금"
         maxLength={60}
+        disabled={busy}
       />
       <View style={styles.selections}>
         <FormSegments
@@ -189,7 +190,8 @@ export function ExpenseForm({
       </View>
       {amountTypeCode === "fixed" ? (
         <Field
-          label="고정 월 금액 (원)"
+          label="고정 월 금액"
+          unit="원"
           value={amount}
           onChangeText={(value) =>
             setAmount((previous) => formatAmountInput(value, previous))
@@ -197,6 +199,7 @@ export function ExpenseForm({
           placeholder="예: 17,000"
           numeric
           maxLength={13}
+          disabled={busy}
         />
       ) : (
         <Text style={s.caption}>
@@ -240,11 +243,8 @@ export function ExpenseForm({
           setError("");
         }}
         disabled={busy}
+        hint="카드로 결제한다면 승인되는 날짜를 입력해 주세요. 해당 날짜가 없는 달에는 마지막 날로 표시해요."
       />
-      <Text style={s.caption}>
-        카드로 결제한다면 승인되는 날짜를 입력해 주세요. 해당 날짜가 없는 달에는
-        마지막 날로 표시해요.
-      </Text>
       <FormSelect
         label="결제수단"
         value={methodId}

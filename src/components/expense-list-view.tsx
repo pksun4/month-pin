@@ -1,11 +1,5 @@
 import { AppText as Text } from "./typography";
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { ReorderableList } from "./reorderable-list";
@@ -30,6 +24,7 @@ import {
   type ExpenseCategoryFilterCode,
 } from "../data/expense-types";
 import { ExpenseRow } from "./expense-row";
+import { ProviderIcon } from "./provider-icon";
 import { ExpenseEndForm } from "./expense-end-form";
 import { formatMonth } from "../utils/ledger";
 import { ExpenseForm } from "./expense-form";
@@ -42,7 +37,7 @@ import {
   RegisterButton,
   listStyles,
 } from "./list-controls";
-import { Button, colors, Empty, FormModal, Header, Screen, s } from "./ui";
+import { ButtonGroup, colors, Empty, FormModal, Header, Screen, s } from "./ui";
 
 export function ExpenseListView({
   active,
@@ -65,6 +60,9 @@ export function ExpenseListView({
   } | null>(null);
   const [ending, setEnding] = useState<Expense | null>(null);
   const [selected, setSelected] = useState<Expense | null>(null);
+  const selectedMethod = selected
+    ? methods.find((method) => method.id === selected.methodId)
+    : undefined;
   const [status, setStatus] = useState<ExpenseStatusCode>("active");
   const sourceExpenses = status === "ended" ? endedExpenses : expenses;
   const [sortCode, setSortCode] = useState<ExpenseSortCode>("charge_day");
@@ -335,6 +333,8 @@ export function ExpenseListView({
       </Screen>
       {(form || selected || ending) && (
         <FormModal
+          presentation={form ? "full_screen" : "dialog"}
+          contentLayout={selected && !form && !ending ? "card" : "form"}
           title={
             ending
               ? "고정비 종료"
@@ -370,85 +370,122 @@ export function ExpenseListView({
             />
           ) : (
             selected && (
-              <>
-                <View style={s.card}>
+              <View style={[s.card, styles.detailCard]}>
+                <View style={styles.detailSummary}>
                   <Text style={s.sectionTitle}>{selected.name}</Text>
-                  <Text style={s.body}>
-                    분류 ·{" "}
-                    {getExpenseCategory(selected.categoryCode)?.label ??
-                      "미분류"}
+                  <Text
+                    style={[
+                      styles.detailAmount,
+                      selected.amountTypeCode === "variable" &&
+                        styles.detailVariableAmount,
+                    ]}
+                  >
+                    {expenseAmountLabel(selected)}
                   </Text>
-                  <Text style={s.body}>
-                    금액 유형 ·{" "}
-                    {getExpenseAmountType(selected.amountTypeCode)?.label}
-                  </Text>
-                  <Text style={s.title}>{expenseAmountLabel(selected)}</Text>
-                  {selected.amountTypeCode === "variable" && (
-                    <Text style={s.caption}>
-                      매월 실제 청구액이 달라지는 항목이에요. 기본 금액은
-                      저장하지 않아요.
-                    </Text>
-                  )}
-                  <Text style={s.caption}>
+                  <Text style={styles.detailCaption}>
                     매월 {selected.chargeDay}일 결제
                   </Text>
-                  {selected.startMonth !== "1000-01" && (
-                    <Text style={s.caption}>
-                      {formatMonth(selected.startMonth)}부터 반영
+                  {selected.amountTypeCode === "variable" && (
+                    <Text style={styles.detailCaption}>
+                      기본 금액은 저장하지 않고, 실제 금액은 캘린더에서
+                      입력해요.
                     </Text>
+                  )}
+                </View>
+                <View style={styles.detailInfo}>
+                  <View style={styles.detailInfoRow}>
+                    <Text style={styles.detailLabel}>분류</Text>
+                    <Text style={styles.detailValue}>
+                      {getExpenseCategory(selected.categoryCode)?.label ??
+                        "미분류"}
+                      {" · "}
+                      {getExpenseAmountType(selected.amountTypeCode)?.label}
+                      {selected.endMonth ? " · 종료" : ""}
+                    </Text>
+                  </View>
+                  <View style={styles.detailInfoRow}>
+                    <Text style={styles.detailLabel}>결제수단</Text>
+                    <View style={styles.detailMethod}>
+                      {selectedMethod && (
+                        <ProviderIcon
+                          code={selectedMethod.providerCode}
+                          size={20}
+                        />
+                      )}
+                      <Text
+                        style={[styles.detailValue, styles.detailMethodValue]}
+                      >
+                        {methodLabel(selectedMethod)}
+                      </Text>
+                    </View>
+                  </View>
+                  {selected.startMonth !== "1000-01" && (
+                    <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailLabel}>적용 시작</Text>
+                      <Text style={styles.detailValue}>
+                        {formatMonth(selected.startMonth)}부터
+                      </Text>
+                    </View>
                   )}
                   {selected.endMonth && (
-                    <Text style={s.caption}>
-                      {formatMonth(selected.endMonth)}까지 반영 · 종료
-                    </Text>
+                    <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailLabel}>적용 종료</Text>
+                      <Text style={styles.detailValue}>
+                        {formatMonth(selected.endMonth)}까지
+                      </Text>
+                    </View>
                   )}
-                  <Text style={s.body}>
-                    {methodLabel(
-                      methods.find((method) => method.id === selected.methodId),
-                    )}
-                  </Text>
                 </View>
-                {selected.endMonth === null ? (
-                  <>
-                    <Button
-                      label="수정"
-                      onPress={() => {
-                        setForm({ expense: selected });
-                        setSelected(null);
-                      }}
-                      disabled={busy}
-                    />
-                    <Button
-                      label="종료"
-                      secondary
-                      onPress={() => {
-                        setEnding(selected);
-                        setSelected(null);
-                      }}
-                      disabled={busy}
-                    />
-                  </>
-                ) : (
-                  <Button
-                    label={
-                      selected.categoryCode === "subscription"
-                        ? "재구독"
-                        : "다시 등록"
-                    }
-                    onPress={() => {
-                      setForm({ renewal: selected });
-                      setSelected(null);
-                    }}
-                    disabled={busy || selected.endMonth === "9999-12"}
+                <View style={styles.detailActions}>
+                  <ButtonGroup
+                    actions={[
+                      {
+                        code: "delete",
+                        label: "삭제",
+                        danger: true,
+                        onPress: () => remove(selected),
+                        disabled: busy,
+                      },
+                      ...(selected.endMonth === null
+                        ? [
+                            {
+                              code: "end",
+                              label: "종료",
+                              secondary: true,
+                              onPress: () => {
+                                setEnding(selected);
+                                setSelected(null);
+                              },
+                              disabled: busy,
+                            },
+                            {
+                              code: "edit",
+                              label: "수정",
+                              onPress: () => {
+                                setForm({ expense: selected });
+                                setSelected(null);
+                              },
+                              disabled: busy,
+                            },
+                          ]
+                        : [
+                            {
+                              code: "renew",
+                              label:
+                                selected.categoryCode === "subscription"
+                                  ? "재구독"
+                                  : "다시 등록",
+                              onPress: () => {
+                                setForm({ renewal: selected });
+                                setSelected(null);
+                              },
+                              disabled: busy || selected.endMonth === "9999-12",
+                            },
+                          ]),
+                    ]}
                   />
-                )}
-                <Button
-                  label="삭제"
-                  danger
-                  onPress={() => remove(selected)}
-                  disabled={busy}
-                />
-              </>
+                </View>
+              </View>
             )
           )}
         </FormModal>
@@ -458,6 +495,62 @@ export function ExpenseListView({
 }
 
 const styles = StyleSheet.create({
+  detailCard: { gap: 16 },
+  detailSummary: { gap: 6 },
+  detailAmount: {
+    color: colors.blue,
+    fontSize: 28,
+    lineHeight: 36,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  detailVariableAmount: { fontSize: 24, lineHeight: 32 },
+  detailCaption: { color: colors.muted, fontSize: 13, lineHeight: 20 },
+  detailInfo: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: 16,
+    gap: 12,
+  },
+  detailInfoRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
+    columnGap: 12,
+    rowGap: 4,
+  },
+  detailLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 20,
+    minWidth: 60,
+  },
+  detailValue: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 120,
+    minWidth: 0,
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "right",
+  },
+  detailMethod: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 120,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+  },
+  detailMethodValue: { flexGrow: 0, flexBasis: "auto" },
+  detailActions: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: 8,
+  },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   compactHeader: { marginBottom: 4 },
   listControls: { gap: 4 },

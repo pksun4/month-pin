@@ -5,6 +5,7 @@ export const colors = {
   muted: "#717789",
   blue: "#536DFE",
   softBlue: "#EBEEFF",
+  blueLine: "#CBD3FF",
   orange: "#E67824",
   green: "#16835D",
   softOrange: "#FFF0E1",

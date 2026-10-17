@@ -28,6 +28,7 @@ import { CARD_BENEFIT_SCHEMA } from "./card-benefits";
 import {
   YEAR_END_TAX_SCHEMA,
   YEAR_END_TAX_SPENDING_SCHEMA,
+  TAX_MONTH_CONFIRMED_COLUMN,
 } from "./year-end-tax";
 import {
   CARD_BENEFIT_HISTORY_SCHEMA,
@@ -128,7 +129,7 @@ export const SCHEMA = `
   ${YEAR_END_TAX_SCHEMA}
   ${YEAR_END_TAX_SPENDING_SCHEMA}
   ${YEAR_END_TAX_CARDS_SCHEMA}
-  PRAGMA user_version = 18;
+  PRAGMA user_version = 19;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -254,7 +255,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 18)
+  if ((version?.user_version ?? 0) > 19)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -450,6 +451,18 @@ export async function initializeDatabase(db: SQLiteDatabase) {
         await db.execAsync(YEAR_END_TAX_CARDS_SCHEMA);
         await migrateOhaCheckSpending(db);
         await db.execAsync("PRAGMA user_version = 18;");
+      });
+    }
+    if (version.user_version <= 18) {
+      await db.withTransactionAsync(async () => {
+        const columns = await db.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(monthly_tax_spending)",
+        );
+        if (!columns.some((column) => column.name === "confirmed"))
+          await db.execAsync(
+            `ALTER TABLE monthly_tax_spending ADD COLUMN ${TAX_MONTH_CONFIRMED_COLUMN};`,
+          );
+        await db.execAsync("PRAGMA user_version = 19;");
       });
     }
     await db.withTransactionAsync(() => syncProviders(db));

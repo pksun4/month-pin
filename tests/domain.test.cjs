@@ -900,7 +900,7 @@ test("v8 upgrade preserves every monthly record, marks actual zero and retries a
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(
       await ledgerRepository.readLedgerMonth(db, ledgerDomain.monthKey()),
@@ -1273,7 +1273,7 @@ test("v7 ledger migration rolls back failures and preserves existing records and
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readExpenses(db), expenses);
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -1667,7 +1667,7 @@ test("wallet card reorder blocks section crossings, saves all cards and restores
     "../../hooks/use-month-pin": { useMonthPin: () => store },
     "../../utils/expenses": domain,
     "../../components/ui": Object.fromEntries(
-      ["Button", "Empty", "FormModal", "Header", "Screen"]
+      ["Button", "ButtonGroup", "Empty", "FormModal", "Header", "Screen"]
         .map((name) => [name, name])
         .concat([["s", {}]]),
     ),
@@ -1762,7 +1762,9 @@ test("wallet card reorder blocks section crossings, saves all cards and restores
     .props.onPress();
   assert.ok(
     flatten(runtime.render((module) => module.default())).some(
-      (node) => node.props?.label === "수정",
+      (node) =>
+        node.type === "ButtonGroup" &&
+        node.props.actions.some((action) => action.label === "수정"),
     ),
   );
   header()
@@ -2171,7 +2173,7 @@ test("v1 migration preserves names, IDs, expenses, bank links, and deleted ID se
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
 
     db.sqlite.close();
@@ -2261,7 +2263,7 @@ test("a failed migration rolls back schema and data and can be retried", async (
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -2754,7 +2756,7 @@ test("v6 card type migration keeps legacy cards unknown and preserves links, ord
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -2927,7 +2929,7 @@ test("v4 order upgrade preserves types, amounts and links; partial migration rol
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     const expenses = await repository.readExpenses(db);
     assert.deepEqual(
@@ -3114,7 +3116,7 @@ test("v5 category migration preserves IDs, amounts, links, custom order and dele
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(
       await repository.readExpenses(db),
@@ -3289,7 +3291,7 @@ test("v3 amount type migration preserves data, links and deleted IDs; a failure 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readExpenses(db), withFixedType(before));
     assert.deepEqual(await repository.readMethods(db), methods);
@@ -3585,7 +3587,7 @@ test("v10 migration converts date settings to monthly latest values atomically w
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.equal((await repository.readExpenses(db))[0].startMonth, "1000-01");
     assert.deepEqual(
@@ -4092,7 +4094,7 @@ test("v11 migration preserves retired card totals and calendar history, rolls ba
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readExpenses(db, "ended"), ended);
     assert.deepEqual(
@@ -4138,17 +4140,17 @@ test("card benefit form preserves edits on failure, prevents duplicate saves and
     },
     onClose: () => closed++,
   });
-  assert.equal(control("월 고정 혜택 (원)").value, "10,000");
+  assert.equal(control("월 고정 혜택").value, "10,000");
   control("월 혜택").onChange("variable");
-  assert.equal(control("월 변동 혜택 예상액 (원)").value, "10,000");
-  control("월 변동 혜택 예상액 (원)").onChangeText("0");
+  assert.equal(control("월 예상 혜택").value, "10,000");
+  control("월 예상 혜택").onChangeText("0");
   const save = control("저장").onPress;
   save();
   save();
   await settle();
   assert.equal(calls.length, 1);
   assert.equal(closed, 0);
-  assert.equal(control("월 변동 혜택 예상액 (원)").value, "0");
+  assert.equal(control("월 예상 혜택").value, "0");
   assert.ok(render().some((node) => node.props?.error));
   fail = false;
   control("저장").onPress();
@@ -4158,15 +4160,15 @@ test("card benefit form preserves edits on failure, prevents duplicate saves and
   assert.equal(calls[1].id, card.id);
   assert.equal(calls[1].input.benefitTypeCode, "variable");
   assert.equal(calls[1].input.benefitAmount, 0);
-  control("월 변동 혜택 예상액 (원)").onChangeText("");
+  control("월 예상 혜택").onChangeText("");
   control("저장").onPress();
   await settle();
   assert.equal(calls.length, 2);
   assert.equal(closed, 1);
   assert.ok(render().some((node) => node.props?.error));
-  control("월 변동 혜택 예상액 (원)").onChangeText("1000000000");
+  control("월 예상 혜택").onChangeText("1000000000");
   assert.equal(control("저장").disabled, false);
-  assert.ok(control("월 변동 혜택 예상액 (원)").error);
+  assert.ok(control("월 예상 혜택").error);
 });
 
 test("card registration requires every applicable field and hides the credit-only date for debit cards", async () => {
@@ -4201,7 +4203,7 @@ test("card registration requires every applicable field and hides the credit-onl
   await blocked("고정·변동");
   control("월 혜택").onChange("fixed");
   await blocked("혜택 금액");
-  control("월 고정 혜택 (원)").onChangeText("0");
+  control("월 고정 혜택").onChangeText("0");
   control("저장").onPress();
   await settle();
   assert.equal(calls.length, 1);
@@ -4216,7 +4218,7 @@ test("card registration requires every applicable field and hides the credit-onl
     undefined,
   );
   control("월 혜택").onChange("variable");
-  control("월 변동 혜택 예상액 (원)").onChangeText("10000");
+  control("월 예상 혜택").onChangeText("10000");
   control("저장").onPress();
   await settle();
   assert.equal(calls[1].cardTypeCode, "debit");
@@ -4333,7 +4335,7 @@ test("method form reveals errors after blur or submit, clears corrected fields a
   assert.ok(component("ProviderSelect").error);
   assert.ok(control("출금 통장").error);
   assert.ok(control("월 혜택").error);
-  assert.ok(control("월 혜택 금액 (원)").error);
+  assert.ok(control("월 혜택 금액").error);
   control("카드 종류").onChange("credit");
   assert.equal(control("카드 종류").error, "");
   assert.ok(control("출금일").error);
@@ -4342,8 +4344,8 @@ test("method form reveals errors after blur or submit, clears corrected fields a
   assert.equal(revealed.at(-1), "providerCode");
   component("ProviderSelect").onChange("card_samsung");
   assert.equal(component("ProviderSelect").error, "");
-  control("월 혜택 금액 (원)").onChangeText("0");
-  assert.equal(control("월 혜택 금액 (원)").error, "");
+  control("월 혜택 금액").onChangeText("0");
+  assert.equal(control("월 혜택 금액").error, "");
   assert.equal(control("저장").disabled, false);
 });
 
@@ -4361,12 +4363,13 @@ test("shared fields expose visual error feedback and modal navigation waits for 
         ActivityIndicator: "Spinner",
         Keyboard: { dismiss: () => {} },
         Platform: { OS: "ios" },
-        useWindowDimensions: () => ({ width: 393, fontScale: 1 }),
+        useWindowDimensions: () => ({ width: 393, height: 852, fontScale: 1 }),
         StyleSheet: { create: (styles) => styles },
       },
       "react-native-safe-area-context": {
         SafeAreaProvider: "SafeAreaProvider",
         SafeAreaView: "SafeAreaView",
+        useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
       },
       "@expo/vector-icons/Ionicons": { default: "Icon" },
       "../hooks/use-month-pin": { useMonthPin: () => ({}) },
@@ -4436,48 +4439,57 @@ test("shared fields expose visual error feedback and modal navigation waits for 
   inline.props.onBlur();
   assert.deepEqual(changes, [""]);
   assert.equal(blurred, true);
-  const modal = uiRuntime();
-  const nodes = flatten(
-    modal.render((ui) =>
-      ui.FormModal({ title: "카드 등록", onClose: () => {}, children: null }),
-    ),
-  );
-  const scroll = nodes.find((node) => node.type === "ScrollView");
-  const provider = nodes.find(
-    (node) => typeof node.props?.value === "function",
-  );
-  const container = { id: "form-content" };
-  provider.props.children.props.ref.current = container;
-  const scrolls = [];
-  scroll.props.ref.current = { scrollTo: (options) => scrolls.push(options) };
-  const frames = [];
-  const original = global.requestAnimationFrame;
-  global.requestAnimationFrame = (callback) => frames.push(callback);
-  let focused = 0;
-  try {
-    provider.props.value(
-      {
-        measureLayout: (ancestor, success) => {
-          assert.equal(ancestor, container);
-          success(0, 240);
+  for (const presentation of ["full_screen", "dialog"]) {
+    const modal = uiRuntime();
+    let nodes = flatten(
+      modal.render((ui) =>
+        ui.FormModal({
+          title: "카드 등록",
+          presentation,
+          onClose: () => {},
+          children: null,
+        }),
+      ),
+    );
+    const dialog = nodes.find((node) => node.type?.name === "DialogContent");
+    if (dialog) nodes = flatten(dialog.type(dialog.props));
+    const scroll = nodes.find((node) => node.type === "ScrollView");
+    const provider = nodes.find(
+      (node) => typeof node.props?.value === "function",
+    );
+    const container = { id: "form-content" };
+    provider.props.children.props.ref.current = container;
+    const scrolls = [];
+    scroll.props.ref.current = { scrollTo: (options) => scrolls.push(options) };
+    const frames = [];
+    const original = global.requestAnimationFrame;
+    global.requestAnimationFrame = (callback) => frames.push(callback);
+    let focused = 0;
+    try {
+      provider.props.value(
+        {
+          measureLayout: (ancestor, success) => {
+            assert.equal(ancestor, container);
+            success(0, 240);
+          },
         },
-      },
-      () => focused++,
-    );
-    assert.equal(focused, 0);
-    assert.equal(scrolls.length, 0);
-    frames.shift()();
-    assert.deepEqual(scrolls, [{ y: 228, animated: true }]);
-    assert.equal(focused, 1);
-    provider.props.value(
-      { measureLayout: (_ancestor, _success, fail) => fail() },
-      () => focused++,
-    );
-    frames.shift()();
-    assert.equal(focused, 2);
-  } finally {
-    if (original) global.requestAnimationFrame = original;
-    else delete global.requestAnimationFrame;
+        () => focused++,
+      );
+      assert.equal(focused, 0);
+      assert.equal(scrolls.length, 0);
+      frames.shift()();
+      assert.deepEqual(scrolls, [{ y: 228, animated: true }]);
+      assert.equal(focused, 1);
+      provider.props.value(
+        { measureLayout: (_ancestor, _success, fail) => fail() },
+        () => focused++,
+      );
+      frames.shift()();
+      assert.equal(focused, 2);
+    } finally {
+      if (original) global.requestAnimationFrame = original;
+      else delete global.requestAnimationFrame;
+    }
   }
 });
 
@@ -4781,7 +4793,7 @@ test("v12 benefit migration preserves data and references, rolls back failures, 
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(
       await db.getAllAsync("SELECT * FROM payment_methods ORDER BY id"),
@@ -4876,8 +4888,19 @@ test("monthly benefit summaries use confirmed actuals including zero and otherwi
 });
 
 test("expense views open on the calendar and retain both views while toggling and revisiting the tab", () => {
+  let params = {};
+  const cleared = [];
   const runtime = hookRuntime("src/app/(tabs)/expenses.tsx", {
     "react-native": { View: "View" },
+    "expo-router": {
+      useLocalSearchParams: () => params,
+      router: {
+        setParams: (next) => {
+          cleared.push(next);
+          params = { ...params, ...next };
+        },
+      },
+    },
     "../../components/expense-list-view": { ExpenseListView: "ListView" },
     "../../components/expense-calendar-view": {
       ExpenseCalendarView: "CalendarView",
@@ -4914,6 +4937,25 @@ test("expense views open on the calendar and retain both views while toggling an
   assert.equal(render().switcher.value, "list");
   view.switcher.onChange("calendar");
   assert.equal(render().calendar.props.active, true);
+  runtime.flush();
+  // Every home shortcut opens the list, even after previously choosing calendar.
+  for (let visit = 0; visit < 2; visit++) {
+    runtime.focus(false);
+    params = { view: "list" };
+    view = render();
+    assert.equal(view.list.props.active, true);
+    assert.equal(view.calendar.props.active, false);
+    runtime.flush();
+    runtime.focus(true);
+    assert.deepEqual(cleared.at(-1), { view: undefined });
+    assert.equal(render().switcher.value, "list");
+    render().switcher.onChange("calendar");
+    assert.equal(render().switcher.value, "calendar");
+    runtime.flush();
+    runtime.focus(false);
+    runtime.focus(true);
+    assert.equal(render().switcher.value, "calendar");
+  }
 });
 
 test("calendar estimates follow month totals and card edits without changing day entries or showing stale amounts during loading", () => {
@@ -4946,6 +4988,7 @@ test("calendar estimates follow month totals and card edits without changing day
   };
   let snapshot = { entries, loading: false, error: null };
   let confirmedBenefits = null;
+  let benefitsLoading = false;
   let requestedMonth;
   let requestedActive;
   let retries = 0;
@@ -4989,7 +5032,7 @@ test("calendar estimates follow month totals and card edits without changing day
                   : null,
             })),
         },
-        loading: false,
+        loading: benefitsLoading,
         error: null,
         retry: () => {},
       }),
@@ -5052,6 +5095,19 @@ test("calendar estimates follow month totals and card edits without changing day
     [1, 3],
   );
   assert.equal(view.label("혜택 반영 예상액").props.children, "52,500원");
+  flatten(view.list.renderItem({ item: entries[2] }))
+    .find((node) => node.type === "EntryRow")
+    .props.onPress();
+  const amountModal = flatten(render().root).find(
+    (node) => node.type === "Modal" && node.props.title === "변동 금액 입력",
+  );
+  assert.equal(amountModal.props.presentation, "dialog");
+  const amountForm = flatten(amountModal).find(
+    (node) => node.type === "AmountForm",
+  );
+  assert.equal(amountForm.props.entry, entries[2]);
+  amountForm.props.onClose();
+  assert.ok(!flatten(render().root).some((node) => node.type === "AmountForm"));
   render(false);
   assert.equal(requestedActive, false);
   view = render();
@@ -5107,13 +5163,33 @@ test("calendar estimates follow month totals and card edits without changing day
   assert.equal(view.label("혜택 반영 예상액").props.children, "-9,000원");
   assert.equal(view.calendar.benefitsConfirmed, true);
   confirmedBenefits = null;
+  benefitsLoading = true;
+  view = render();
+  assert.equal(view.label("월 지출 합계").props.children, "—");
+  assert.equal(view.label("혜택 반영 예상액").props.children, "—");
+  assert.deepEqual(view.calendar.entries, []);
+  assert.equal(view.calendar.dataReady, false);
+  assert.equal(view.list.ListFooterComponent, null);
+  benefitsLoading = false;
   snapshot = { ...snapshot, loading: true };
   view = render();
-  assert.equal(view.label("혜택 반영 예상액"), undefined);
+  assert.equal(view.label("혜택 반영 예상액").props.children, "—");
+  assert.ok(view.calendar);
+  assert.equal(view.calendar.dataReady, false);
+  assert.deepEqual(view.calendar.entries, []);
+  assert.equal(view.calendar.benefitsConfirmed, false);
+  assert.equal(view.calendar.benefitsPending, false);
   assert.deepEqual(view.list.data, []);
+  assert.equal(view.list.ListFooterComponent, null);
+  flatten(view.list.renderItem({ item: entries[2] }))
+    .find((node) => node.type === "EntryRow")
+    .props.onPress();
+  assert.ok(!flatten(render().root).some((node) => node.type === "AmountForm"));
   snapshot = { ...snapshot, loading: false, error: "조회 실패" };
   view = render();
-  assert.equal(view.label("혜택 반영 예상액"), undefined);
+  assert.equal(view.label("혜택 반영 예상액").props.children, "—");
+  assert.ok(view.calendar);
+  assert.deepEqual(view.calendar.entries, []);
   view.nodes
     .find((node) => node.type === "Button" && node.props.label === "다시 시도")
     .props.onPress();
@@ -5375,7 +5451,7 @@ test("v13 settlement migration preserves legacy data, rolls back and retries, an
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(await repository.readExpenses(db), expenses);
@@ -5483,12 +5559,13 @@ test("calendar marks only each month's last day for benefit settlement, includin
     ["2026-10", 31],
   ]) {
     let selected;
-    const render = (benefitsConfirmed, entries = []) =>
+    const render = (benefitsConfirmed, entries = [], dataReady = true) =>
       flatten(
         runtime.render(({ LedgerCalendar }) =>
           LedgerCalendar({
             month,
             entries,
+            dataReady,
             selectedDay: 1,
             benefitsConfirmed,
             benefitsPending: !benefitsConfirmed,
@@ -5531,6 +5608,25 @@ test("calendar marks only each month's last day for benefit settlement, includin
     );
     assert.ok(cells[0].props.accessibilityLabel.includes("확정 완료"));
     assert.equal(dots(cells[0]).length, 0);
+    const pendingCells = render(
+      false,
+      [
+        { id: 1, day: lastDay, amount: null },
+        { id: 2, day: 1, amount: 12345 },
+      ],
+      false,
+    ).filter((node) => node.type === "Pressable");
+    assert.equal(pendingCells.length, lastDay);
+    for (const cell of pendingCells) {
+      assert.ok(cell.props.accessibilityLabel.endsWith("내역 조회 전"));
+      assert.equal(dots(cell).length, 0);
+      assert.equal(
+        flatten(cell).filter((node) => node.type === "Text").length,
+        1,
+      );
+    }
+    pendingCells.at(-1).props.onPress();
+    assert.equal(selected, lastDay);
     for (const confirmed of [false, true]) {
       const withPendingExpense = render(confirmed, [
         { id: 1, day: lastDay, amount: null },
@@ -5957,7 +6053,7 @@ test("v14 benefit history migration preserves confirmations and unvisited estima
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await repository.readMethods(db), methods);
     assert.deepEqual(
@@ -6017,7 +6113,7 @@ test("card edits expose the same effective-month picker as expenses and submit t
       calls.push({ input, id, effectiveMonth }),
   });
   assert.equal(fixture.component("MonthField"), undefined);
-  fixture.control("월 고정 혜택 (원)").onChangeText("9000");
+  fixture.control("월 고정 혜택").onChangeText("9000");
   assert.equal(fixture.control("변경 적용 월").minimumMonth, now);
   const next = ledgerDomain.moveMonth(now, 1);
   fixture.control("변경 적용 월").onChange(next);
@@ -6262,7 +6358,7 @@ test("annual summary matches all twelve calendars, keeps actual zero and confirm
     );
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
   } finally {
@@ -6472,10 +6568,11 @@ test("settlement starts with annual summary and switches views without discardin
   const options = nodes.find((node) => node.type === "Tabs").props.options;
   assert.deepEqual(
     options.map((option) => option.label),
-    ["연간 요약", "연말정산"],
+    ["고정비", "연말정산"],
   );
   nodes.find((node) => node.type === "Tabs").props.onChange("year_end_tax");
   nodes = render();
+  const taxKey = nodes.find((node) => node.type === "Tax").key;
   assert.equal(nodes.find((node) => node.type === "Tax").props.active, true);
   assert.equal(
     nodes.find((node) => node.type === "Tax").props.year,
@@ -6486,6 +6583,7 @@ test("settlement starts with annual summary and switches views without discardin
   nodes.find((node) => node.type === "Tax").props.onYearChange(taxYear);
   nodes = render();
   assert.equal(nodes.find((node) => node.type === "Tax").props.year, taxYear);
+  assert.equal(nodes.find((node) => node.type === "Tax").key, taxKey);
   assert.equal(
     nodes.find((node) => node.type === "Annual").props.active,
     false,
@@ -6517,7 +6615,7 @@ test("settlement starts with annual summary and switches views without discardin
   );
 });
 
-test("annual view follows the shared year and shows loading and retry states without amounts", () => {
+test("annual view keeps totals and all twelve months through loading, empty years and retry states", () => {
   const requests = [];
   let state = { snapshot: null, loading: true, error: null };
   let retries = 0;
@@ -6548,7 +6646,14 @@ test("annual view follows the shared year and shows loading and retry states wit
     Array.isArray(node)
       ? node.flatMap(flatten)
       : node && typeof node === "object"
-        ? [node, ...flatten(node.props?.children)]
+        ? [
+            node,
+            ...flatten(
+              typeof node.type === "function"
+                ? node.type(node.props)
+                : node.props?.children,
+            ),
+          ]
         : [];
   const render = (active = true, year = 2026) =>
     flatten(
@@ -6561,23 +6666,90 @@ test("annual view follows the shared year and shows loading and retry states wit
       ),
     );
   let nodes = render();
-  assert.ok(nodes.some((node) => node.type === "Spinner"));
+  assert.ok(!nodes.some((node) => node.type === "Spinner"));
+  assert.equal(
+    nodes.filter((node) =>
+      node.props?.accessibilityLabel?.match(/^\d+월, 조회 전$/),
+    ).length,
+    12,
+  );
+  assert.ok(nodes.some((node) => node.props?.accessibilityState?.busy));
+  assert.ok(
+    nodes.some(
+      (node) => node.props?.accessibilityLabel === "연간 지출 합계 조회 전",
+    ),
+  );
   assert.deepEqual(requests.at(-1), { year: 2026, active: true });
   render(true, 2025);
   assert.deepEqual(requests.at(-1), { year: 2025, active: true });
   state = { snapshot: null, loading: false, error: "failed" };
   nodes = render();
   assert.ok(nodes.some((node) => node.props?.accessibilityRole === "alert"));
-  assert.ok(!nodes.some((node) => typeof node.type === "function"));
+  assert.equal(
+    nodes.filter((node) =>
+      node.props?.accessibilityLabel?.match(/^\d+월, 조회 전$/),
+    ).length,
+    12,
+  );
   nodes.find((node) => node.type === "Button").props.onPress();
   assert.equal(retries, 1);
   const yearSelector = nodes.find((node) => node.type === "YearSelector");
   yearSelector.props.onChange(2025);
   assert.deepEqual(yearChanges, [2025]);
-  state = { snapshot: { year: 2026, months: [] }, loading: false, error: null };
-  const content = render().find((node) => typeof node.type === "function");
-  const emptyNodes = flatten(content.type(content.props));
-  assert.ok(emptyNodes.some((node) => node.type === "Empty"));
+  const months = annualDomain.monthsOfYear(2026).map((month) => ({
+    month,
+    expenseTotal: 0,
+    expenseCount: 0,
+    pendingExpenses: 0,
+    benefitTotal: 0,
+    benefitCount: 0,
+    pendingBenefits: 0,
+  }));
+  state = { snapshot: { year: 2026, months }, loading: false, error: null };
+  const emptyNodes = render();
+  assert.ok(!emptyNodes.some((node) => node.type === "Empty"));
+  assert.equal(
+    emptyNodes.filter((node) =>
+      node.props?.accessibilityLabel?.includes("지출 합계 내역 없음"),
+    ).length,
+    12,
+  );
+  assert.ok(
+    emptyNodes.some(
+      (node) =>
+        node.type === "Text" && [node.props.children].flat().join("") === "0원",
+    ),
+  );
+  months[0] = {
+    ...months[0],
+    expenseCount: 1,
+    expenseTotal: 10000,
+    benefitCount: 1,
+    benefitTotal: 1000,
+  };
+  nodes = render();
+  assert.ok(
+    nodes.some((node) =>
+      node.props?.accessibilityLabel?.includes("1월, 지출 합계 10,000원"),
+    ),
+  );
+  state = { snapshot: null, loading: true, error: null };
+  nodes = render(true, 2025);
+  assert.equal(
+    nodes.filter((node) =>
+      node.props?.accessibilityLabel?.match(/^\d+월, 조회 전$/),
+    ).length,
+    12,
+  );
+  assert.ok(
+    !nodes.some((node) =>
+      [node.props?.children]
+        .flat()
+        .some(
+          (child) => typeof child === "string" && child.includes("10,000원"),
+        ),
+    ),
+  );
   assert.equal(
     emptyNodes.find((node) => node.type === "YearSelector").props.year,
     2026,
@@ -6674,7 +6846,7 @@ test("tax salary is separate by year, editable, persists after reopening, and va
     );
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
   } finally {
     db.sqlite.close();
@@ -6733,7 +6905,7 @@ test("v15 tax migration preserves existing records, rolls back a failed migratio
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(
       await Promise.all(
@@ -6903,7 +7075,7 @@ test("salary form validates on submit, previews targets, prevents duplicate save
   assert.equal(closed, 1);
 });
 
-test("tax view shows target with a salary modal action, hides saved salary text and accessibility values, and clears stale amounts", () => {
+test("tax view keeps its target card during loading, hides stale values and resets editors on year changes", () => {
   let state = {
     loading: false,
     error: null,
@@ -6943,11 +7115,11 @@ test("tax view shows target with a salary modal action, hides saved salary text 
       : node && typeof node === "object"
         ? [node, ...flatten(node.props?.children)]
         : [];
-  const render = () =>
+  const render = (year = 2026) =>
     flatten(
       runtime.render(({ YearEndTaxView }) =>
         YearEndTaxView({
-          year: 2026,
+          year,
           active: true,
           onYearChange: (year) => {
             changedYear = year;
@@ -6968,6 +7140,10 @@ test("tax view shows target with a salary modal action, hides saved salary text 
   assert.equal(cardAction().label, "카드 선택 · 3개");
   cardAction().onPress();
   nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Modal").props.presentation,
+    "dialog",
+  );
   assert.deepEqual(
     nodes.find((node) => node.type === "CardSelectionForm").props.selectedIds,
     [11, 12, 13],
@@ -7000,6 +7176,10 @@ test("tax view shows target with a salary modal action, hides saved salary text 
     "2026년 1월 사용금액",
   );
   assert.equal(
+    nodes.find((node) => node.type === "Modal").props.presentation,
+    "full_screen",
+  );
+  assert.equal(
     nodes.find((node) => node.type === "SpendingForm").props.amounts,
     null,
   );
@@ -7022,6 +7202,10 @@ test("tax view shows target with a salary modal action, hides saved salary text 
   );
   salaryAction().props.onPress();
   nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "Modal").props.presentation,
+    "dialog",
+  );
   assert.equal(
     nodes.find((node) => node.type === "SalaryForm").props.settings.grossSalary,
     null,
@@ -7121,9 +7305,51 @@ test("tax view shows target with a salary modal action, hides saved salary text 
     ).props.children,
     "0원",
   );
+  state.snapshot = {
+    year: 2026,
+    grossSalary: 40000000,
+    months: [
+      { ...entered, month: 1, confirmed: false },
+      { ...entered, month: 7, confirmed: true },
+    ],
+  };
+  nodes = render();
+  const confirmedMonth = nodes.find(
+    (node) =>
+      node.props?.accessibilityLabel ===
+      "2026년 7월 사용금액 1,000원, 확정, 수정",
+  );
+  assert.ok(confirmedMonth);
+  assert.ok(
+    nodes.some(
+      (node) =>
+        node.props?.accessibilityLabel === "2026년 1월 사용금액 1,000원, 수정",
+    ),
+  );
+  confirmedMonth.props.onPress();
+  nodes = render();
+  assert.equal(
+    nodes.find((node) => node.type === "SpendingForm").props.confirmed,
+    true,
+  );
+  nodes.find((node) => node.type === "SpendingForm").props.onClose();
   state = { snapshot: null, loading: true, error: null };
   nodes = render();
-  assert.ok(nodes.some((node) => node.type === "Spinner"));
+  assert.ok(!nodes.some((node) => node.type === "Spinner"));
+  assert.ok(nodes.some((node) => node.props?.accessibilityState?.busy));
+  assert.equal(
+    nodes.find((node) => node.props?.accessibilityLabel === "목표금액 조회 중")
+      .props.children,
+    "—",
+  );
+  assert.equal(
+    nodes.find((node) => node.props?.accessibilityLabel === "잔여금액 조회 중")
+      .props.children,
+    "—",
+  );
+  assert.equal(salaryAction().props.disabled, true);
+  salaryAction().props.onPress();
+  assert.ok(!render().some((node) => node.type === "SalaryForm"));
   const pendingMonth = nodes.find(
     (node) => node.props?.accessibilityLabel === "2026년 1월 사용금액 조회 전",
   );
@@ -7135,15 +7361,45 @@ test("tax view shows target with a salary modal action, hides saved salary text 
   assert.equal(cardAction().disabled, true);
   cardAction().onPress();
   assert.ok(!render().some((node) => node.type === "CardSelectionForm"));
-  assert.ok(
-    !nodes.some((node) =>
-      node.props?.accessibilityLabel?.startsWith("목표금액"),
-    ),
-  );
   state = { snapshot: null, loading: false, error: "failed" };
   nodes = render();
   nodes.find((node) => node.type === "Button").props.onPress();
   assert.equal(retries, 1);
+  state = {
+    snapshot: { year: 2026, grossSalary: 40000000, months: [] },
+    loading: false,
+    error: null,
+  };
+  // Changing away and back must not resurrect an editor or its draft.
+  for (const open of [
+    () => salaryAction().props.onPress(),
+    () => cardAction().onPress(),
+    () =>
+      nodes
+        .find((node) =>
+          node.props?.accessibilityLabel?.startsWith("2026년 1월 사용금액"),
+        )
+        .props.onPress(),
+    () =>
+      nodes
+        .find(
+          (node) =>
+            node.props?.accessibilityLabel === "사용금액 소득공제율 안내",
+        )
+        .props.onPress(),
+  ]) {
+    nodes = render();
+    open();
+    assert.ok(render().some((node) => node.type === "Modal"));
+    state = { snapshot: null, loading: true, error: null };
+    assert.ok(!render(2025).some((node) => node.type === "Modal"));
+    state = {
+      snapshot: { year: 2026, grossSalary: 40000000, months: [] },
+      loading: false,
+      error: null,
+    };
+    assert.ok(!render().some((node) => node.type === "Modal"));
+  }
 });
 
 test("deduction guide explains tax bands before descending payment rates and shows a conditional tax-saving example without links", () => {
@@ -7362,7 +7618,7 @@ test("monthly tax amounts keep years, months and explicit zero separate, reject 
     );
     assert.deepEqual(
       (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0],
-      { ...updated, cards: [] },
+      { ...updated, cards: [], confirmed: false },
     );
     await db.execAsync("DROP TRIGGER fail_tax_month;");
     for (const [year, month, amount] of [
@@ -7386,8 +7642,14 @@ test("monthly tax amounts keep years, months and explicit zero separate, reject 
     saved = await taxRepository.loadYearEndTaxYear(db, 2026);
     assert.equal(saved.grossSalary, 40000000);
     assert.deepEqual(saved.months, [
-      { ...updated, cards: [] },
-      { year: 2026, month: 2, amounts: taxAmounts(), cards: [] },
+      { ...updated, cards: [], confirmed: false },
+      {
+        year: 2026,
+        month: 2,
+        amounts: taxAmounts(),
+        cards: [],
+        confirmed: false,
+      },
     ]);
     assert.equal(
       (await taxRepository.loadYearEndTaxYear(db, 2025)).months[0].amounts
@@ -7458,7 +7720,7 @@ test("v16 monthly tax migration preserves salary and existing history, rolls bac
     await repository.initializeDatabase(db);
     assert.equal(
       (await db.getFirstAsync("PRAGMA user_version")).user_version,
-      18,
+      19,
     );
     assert.deepEqual(await read(), before);
     assert.deepEqual(await taxRepository.loadYearEndTaxYear(db, 2026), {
@@ -7511,7 +7773,12 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
   let busy = false;
   const saves = [];
   const focused = [];
-  const fixture = (amounts = null, selectedCards = [], cards = []) => {
+  const fixture = (
+    amounts = null,
+    selectedCards = [],
+    cards = [],
+    confirmed = false,
+  ) => {
     const runtime = hookRuntime("src/components/year-end-spending-form.tsx", {
       "react-native": {
         View: "View",
@@ -7522,7 +7789,7 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
       "../data/providers": loadTypeScript("src/data/providers.ts"),
       "../data/method-types": loadTypeScript("src/data/method-types.ts"),
       "./ui": {
-        Button: "Button",
+        ButtonGroup: "ButtonGroup",
         Field: "Field",
         FieldMessage: "FieldMessage",
         s: {},
@@ -7565,6 +7832,7 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
             amounts,
             selectedCards,
             cards,
+            confirmed,
             onClose: () => closed++,
           }),
         ),
@@ -7573,11 +7841,17 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
       render().find(
         (node) => node.type === "Field" && node.props.label === label,
       ).props;
+    const actions = () =>
+      render().find((node) => node.type === "ButtonGroup").props.actions;
     const save = () =>
-      render()
-        .find((node) => node.type === "Button")
-        .props.onPress();
-    return { render, field, save };
+      actions()
+        .find((action) => action.code === "save")
+        .onPress();
+    const confirm = () =>
+      actions()
+        .find((action) => action.code === "confirm")
+        .onPress();
+    return { render, field, save, confirm, actions };
   };
   const form = fixture();
   assert.deepEqual(
@@ -7589,7 +7863,7 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
   );
   form.field("현금영수증").onChangeText("10000000000");
   form.field("현금영수증").controlRef({ focus: () => focused.push("cash") });
-  form.save();
+  form.confirm();
   await settle();
   assert.ok(form.field("현금영수증").error);
   assert.deepEqual(focused, ["cash"]);
@@ -7615,6 +7889,7 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
       local_card: 300000,
     }),
     cards: [],
+    confirmed: false,
   });
   assert.equal(closed, 0);
   assert.equal(form.field("현금영수증").value, "100,000");
@@ -7672,10 +7947,245 @@ test("monthly tax form accepts blank zeroes, previews sums, preserves edits afte
   await settle();
   zero.field("오하Check").onChangeText("125000");
   assert.equal(zero.field("오하Check").value, "125,000");
+  fail = true;
+  zero.confirm();
+  await settle();
+  assert.equal(saves.at(-1).confirmed, true);
+  assert.equal(zero.field("오하Check").value, "125,000");
+  assert.equal(
+    zero.render().find((node) => node.type === "FieldMessage").props.error,
+    "저장 실패",
+  );
+  fail = false;
+  zero.confirm();
+  const pendingCount = saves.length;
+  zero.save();
+  zero.confirm();
+  assert.equal(saves.length, pendingCount);
+  assert.ok(zero.actions().every((action) => action.disabled));
+  assert.equal(saves.at(-1).confirmed, true);
+  finish();
+  await settle();
+  const confirmedForm = fixture(taxAmounts({ cash_receipt: 50 }), [], [], true);
+  assert.deepEqual(
+    confirmedForm.actions().map((action) => action.code),
+    ["save"],
+  );
+  confirmedForm.field("현금영수증").onChangeText("75");
+  confirmedForm.save();
+  assert.equal(saves.at(-1).confirmed, true);
+  assert.equal(saves.at(-1).amounts.cash_receipt, 75);
+  finish();
+  await settle();
 });
 
 const taxCardRepository = loadTypeScript("src/data/year-end-tax-cards.ts");
 const taxFieldDomain = loadTypeScript("src/utils/tax-spending-fields.ts");
+
+test("monthly tax confirmation saves atomically with amounts and cards, validates booleans, and survives reopening", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monthpin-tax-confirmation-"));
+  const path = join(directory, "confirmation.db");
+  let db = sqliteAdapter(path);
+  try {
+    await repository.initializeDatabase(db);
+    const { second } = await seedSettlementCards(db);
+    await taxCardRepository.saveYearEndTaxCards(db, 2026, [second.id]);
+    const [selected] = (await taxRepository.loadYearEndTaxYear(db, 2026))
+      .selectedCards;
+    const draft = {
+      year: 2026,
+      month: 1,
+      amounts: taxAmounts({ cash_receipt: 100 }),
+      cards: [],
+      confirmed: false,
+    };
+    await taxRepository.saveYearEndTaxMonth(db, draft);
+    await db.execAsync(
+      "CREATE TRIGGER fail_tax_confirmation BEFORE INSERT ON monthly_tax_cards WHEN NEW.amount = 777 BEGIN SELECT RAISE(ABORT, 'confirmation card failure'); END;",
+    );
+    await assert.rejects(
+      taxRepository.saveYearEndTaxMonth(db, {
+        ...draft,
+        confirmed: true,
+        amounts: taxAmounts({ cash_receipt: 999 }),
+        cards: [{ ...selected, id: null, amount: 777 }],
+      }),
+      /confirmation card failure/,
+    );
+    assert.deepEqual(
+      (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0],
+      draft,
+    );
+    await db.execAsync("DROP TRIGGER fail_tax_confirmation;");
+    await taxRepository.saveYearEndTaxMonth(db, {
+      ...draft,
+      confirmed: true,
+      cards: [{ ...selected, id: null, amount: 250 }],
+    });
+    let saved = (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0];
+    assert.equal(saved.confirmed, true);
+    assert.equal(taxDomain.taxEntryTotal(saved), 350);
+    assert.equal(
+      (
+        await db.getFirstAsync(
+          "SELECT confirmed FROM monthly_tax_spending WHERE year = 2026 AND month = 1",
+        )
+      ).confirmed,
+      1,
+    );
+    const { confirmed: _confirmed, ...olderInput } = saved;
+    await taxRepository.saveYearEndTaxMonth(db, {
+      ...olderInput,
+      amounts: taxAmounts({ cash_receipt: 150 }),
+    });
+    saved = (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0];
+    assert.equal(saved.confirmed, true);
+    assert.equal(taxDomain.taxEntryTotal(saved), 400);
+    for (const confirmed of [0, 1, "true", null, {}, []])
+      await assert.rejects(
+        taxRepository.saveYearEndTaxMonth(db, {
+          ...saved,
+          confirmed,
+        }),
+        /확정 상태/,
+      );
+    for (const value of [2, -1, 0.5, "invalid", null])
+      await assert.rejects(
+        db.runAsync(
+          "UPDATE monthly_tax_spending SET confirmed = ? WHERE year = 2026 AND month = 1",
+          value,
+        ),
+      );
+    assert.deepEqual(
+      (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0],
+      saved,
+    );
+    await taxRepository.saveYearEndTaxMonth(db, {
+      year: 2026,
+      month: 2,
+      amounts: taxAmounts(),
+      confirmed: true,
+    });
+    await taxRepository.saveYearEndTaxMonth(db, {
+      year: 2025,
+      month: 1,
+      amounts: taxAmounts(),
+    });
+    db.sqlite.close();
+    db = sqliteAdapter(path);
+    await repository.initializeDatabase(db);
+    const loaded = await taxRepository.loadYearEndTaxYear(db, 2026);
+    assert.deepEqual(loaded.months[0], saved);
+    assert.equal(loaded.months[1].confirmed, true);
+    assert.equal(taxDomain.taxEntryTotal(loaded.months[1]), 0);
+    assert.equal(
+      (await taxRepository.loadYearEndTaxYear(db, 2025)).months[0].confirmed,
+      false,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("v18 tax confirmation migration preserves existing records as drafts, rolls back failures and retries once", async () => {
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    const { second } = await seedSettlementCards(db);
+    await taxRepository.saveYearEndTaxSalary(db, 2026, 40000000);
+    await taxCardRepository.saveYearEndTaxCards(db, 2026, [second.id]);
+    const [card] = (await taxRepository.loadYearEndTaxYear(db, 2026))
+      .selectedCards;
+    await taxRepository.saveYearEndTaxMonth(db, {
+      year: 2026,
+      month: 1,
+      amounts: taxAmounts({ cash_receipt: 123 }),
+      cards: [{ ...card, id: null, amount: 456 }],
+    });
+    await taxRepository.saveYearEndTaxMonth(db, {
+      year: 2025,
+      month: 12,
+      amounts: taxAmounts(),
+    });
+    await repository.saveExpense(db, insuranceInput);
+    await ledgerRepository.loadLedgerMonth(db, "2026-01");
+    await db.execAsync(
+      "ALTER TABLE monthly_tax_spending DROP COLUMN confirmed; PRAGMA user_version = 18;",
+    );
+    const tables = [
+      "payment_methods",
+      "expenses",
+      "ledger_entries",
+      "expense_amount_versions",
+      "card_benefit_versions",
+      "monthly_card_benefits",
+      "annual_tax_settings",
+      "annual_tax_cards",
+      "monthly_tax_cards",
+    ];
+    const read = () =>
+      Promise.all(
+        tables.map((table) =>
+          db.getAllAsync(`SELECT * FROM ${table} ORDER BY rowid`),
+        ),
+      );
+    const before = await read();
+    const amountsBefore = await db.getAllAsync(
+      "SELECT * FROM monthly_tax_spending ORDER BY year, month",
+    );
+    const exec = db.execAsync;
+    db.execAsync = async (sql) => {
+      await exec(sql);
+      if (sql === "PRAGMA user_version = 19;")
+        throw new Error("confirmation migration failure");
+    };
+    await assert.rejects(
+      repository.initializeDatabase(db),
+      /confirmation migration failure/,
+    );
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      18,
+    );
+    assert.ok(
+      !(await db.getAllAsync("PRAGMA table_info(monthly_tax_spending)")).some(
+        (column) => column.name === "confirmed",
+      ),
+    );
+    assert.deepEqual(await read(), before);
+    assert.deepEqual(
+      await db.getAllAsync(
+        "SELECT * FROM monthly_tax_spending ORDER BY year, month",
+      ),
+      amountsBefore,
+    );
+    db.execAsync = exec;
+    await repository.initializeDatabase(db);
+    await repository.initializeDatabase(db);
+    assert.equal(
+      (await db.getFirstAsync("PRAGMA user_version")).user_version,
+      19,
+    );
+    assert.deepEqual(await read(), before);
+    const rows = await db.getAllAsync(
+      "SELECT * FROM monthly_tax_spending ORDER BY year, month",
+    );
+    assert.deepEqual(
+      rows.map(({ confirmed, ...row }) => row),
+      amountsBefore.map((row) => ({ ...row })),
+    );
+    assert.ok(rows.every((row) => row.confirmed === 0));
+    assert.equal(
+      (await taxRepository.loadYearEndTaxYear(db, 2026)).months[0].confirmed,
+      false,
+    );
+    assert.deepEqual(await db.getAllAsync("PRAGMA foreign_key_check"), []);
+  } finally {
+    db.sqlite.close();
+  }
+});
 
 test("v17 tax card migration moves legacy debit totals only to unique OhaCheck and rolls back the whole change on failure", async () => {
   const db = sqliteAdapter();

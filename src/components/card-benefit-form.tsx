@@ -167,6 +167,7 @@ function CardBenefitAmountField({
     <View ref={containerRef} collapsable={false}>
       <Field
         label={`${card.providerName} · ${card.name}`}
+        unit="원"
         value={value}
         onChangeText={onChange}
         onBlur={onBlur}
@@ -175,7 +176,7 @@ function CardBenefitAmountField({
         disabled={disabled}
         error={error}
         hint={`월 예상 혜택 ${money(card.expectedAmount)}`}
-        placeholder="실제 혜택 금액 (원)"
+        placeholder="실제 혜택 금액"
         maxLength={11}
         controlRef={inputRef}
       />

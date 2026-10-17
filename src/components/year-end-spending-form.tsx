@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { StyleSheet, type TextInput, View } from "react-native";
 import { AppText as Text } from "./typography";
 import {
-  Button,
+  ButtonGroup,
   colors,
   Field,
   FieldMessage,
@@ -25,6 +25,7 @@ export function YearEndSpendingForm({
   amounts,
   cards = [],
   selectedCards = [],
+  confirmed = false,
   onClose,
 }: {
   year: number;
@@ -32,6 +33,7 @@ export function YearEndSpendingForm({
   amounts: TaxSpendingAmounts | null;
   cards?: TaxCardSpending[];
   selectedCards?: YearEndTaxCard[];
+  confirmed?: boolean;
   onClose: () => void;
 }) {
   const { busy, saveYearEndTaxMonth } = useMonthPin();
@@ -52,6 +54,9 @@ export function YearEndSpendingForm({
   const [touched, setTouched] = useState<Partial<Record<string, boolean>>>({});
   const [submitted, setSubmitted] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [savingAction, setSavingAction] = useState<"save" | "confirm" | null>(
+    null,
+  );
   const inputRefs = useRef<Partial<Record<string, TextInput | null>>>({});
   const containerRefs = useRef<Partial<Record<string, View | null>>>({});
   const savingRef = useRef(false);
@@ -73,7 +78,9 @@ export function YearEndSpendingForm({
     ? null
     : fields.reduce((sum, field) => sum + (parsed[field.key] ?? 0), 0);
 
-  async function save() {
+  const disabled = busy || savingAction !== null;
+
+  async function save(confirmMonth = false) {
     if (busy || savingRef.current) return;
     setSubmitted(true);
     setSaveError("");
@@ -85,6 +92,7 @@ export function YearEndSpendingForm({
       return;
     }
     savingRef.current = true;
+    setSavingAction(confirmMonth ? "confirm" : "save");
     try {
       const nextAmounts: TaxSpendingAmounts = {
         cash_receipt: 0,
@@ -103,6 +111,7 @@ export function YearEndSpendingForm({
         month,
         amounts: nextAmounts,
         cards: nextCards,
+        confirmed: confirmed || confirmMonth,
       });
       onClose();
     } catch (cause) {
@@ -113,6 +122,7 @@ export function YearEndSpendingForm({
       );
     } finally {
       savingRef.current = false;
+      setSavingAction(null);
     }
   }
 
@@ -180,7 +190,7 @@ export function YearEndSpendingForm({
                   placeholder="0"
                   numeric
                   maxLength={13}
-                  disabled={busy}
+                  disabled={disabled}
                   hint={method.hint}
                   error={
                     (submitted || touched[method.key]) &&
@@ -210,10 +220,26 @@ export function YearEndSpendingForm({
           </Text>
         </View>
         <FieldMessage error={saveError} />
-        <Button
-          label={busy ? "저장 중…" : "저장"}
-          disabled={busy}
-          onPress={() => void save()}
+        <ButtonGroup
+          actions={[
+            {
+              code: "save",
+              label: savingAction === "save" ? "저장 중…" : "저장",
+              secondary: !confirmed,
+              disabled,
+              onPress: () => void save(),
+            },
+            ...(!confirmed
+              ? [
+                  {
+                    code: "confirm",
+                    label: savingAction === "confirm" ? "확정 중…" : "확정",
+                    disabled,
+                    onPress: () => void save(true),
+                  },
+                ]
+              : []),
+          ]}
         />
       </View>
     </View>

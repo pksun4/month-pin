@@ -25,7 +25,11 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { colors } from "./theme";
@@ -87,41 +91,66 @@ export function FieldMessage({
 }
 export type IconName = ComponentProps<typeof Ionicons>["name"];
 
+export type ButtonProps = {
+  label: string;
+  onPress: () => void;
+  secondary?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
+};
+
 export function Button({
   label,
   onPress,
   secondary = false,
   danger = false,
   disabled = false,
-}: {
-  label: string;
-  onPress: () => void;
-  secondary?: boolean;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
+  inGroup = false,
+}: ButtonProps & { inGroup?: boolean }) {
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
+      accessibilityState={{ disabled }}
       onPress={onPress}
       style={({ pressed }) => [
         s.button,
         secondary && s.secondary,
         danger && s.danger,
+        inGroup && s.groupedButton,
         (pressed || disabled) && { opacity: 0.6 },
       ]}
     >
       <Text
         style={[
           s.buttonText,
-          secondary && { color: colors.blue },
+          secondary && { color: colors.muted },
           danger && { color: colors.red },
         ]}
       >
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+export function ButtonGroup({
+  actions,
+}: {
+  actions: readonly (ButtonProps & { code: string })[];
+}) {
+  const { fontScale } = useWindowDimensions();
+  return (
+    <View style={s.buttonGroup}>
+      {actions.map(({ code, ...action }) => (
+        <View
+          key={code}
+          style={[s.buttonGroupItem, { flexBasis: 80 * fontScale }]}
+        >
+          <Button {...action} inGroup />
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -208,7 +237,7 @@ export function Empty({
       <View style={s.emptyIcon}>
         <Ionicons name={icon} size={28} color={colors.blue} />
       </View>
-      <Text style={s.sectionTitle}>{title}</Text>
+      <Text style={[s.sectionTitle, s.centerText]}>{title}</Text>
       <Text style={[s.caption, s.centerText]}>{description}</Text>
       {action}
     </View>
@@ -220,12 +249,18 @@ export function FormModal({
   children,
   onClose,
   busy = false,
+  presentation = "full_screen",
+  contentLayout = "form",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   busy?: boolean;
+  presentation?: "full_screen" | "dialog";
+  contentLayout?: "form" | "card";
 }) {
+  // Keep the native presentation stable when a detail dialog expands into a form.
+  const [transparent] = useState(() => presentation === "dialog");
   const scrollRef = useRef<ScrollView>(null);
   const contentRef = useRef<View>(null);
   function revealField(field: View | null, focus?: () => void) {
@@ -254,33 +289,162 @@ export function FormModal({
   }
 
   return (
-    <Modal animationType="slide" onRequestClose={close}>
+    <Modal
+      animationType={transparent ? "fade" : "slide"}
+      transparent={transparent}
+      onRequestClose={close}
+    >
       <SafeAreaProvider>
-        <SafeAreaView style={s.screen}>
-          <View style={s.modalHeader}>
-            <Text style={[s.sectionTitle, s.flex]}>{title}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="닫기"
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              hitSlop={8}
-              onPress={close}
-              style={({ pressed }) => [
-                s.modalCloseButton,
-                (pressed || busy) && { opacity: 0.5 },
-              ]}
-            >
-              <Ionicons name="close" size={26} color={colors.ink} />
-            </Pressable>
-          </View>
-          <KeyboardAvoidingView
-            style={s.flex}
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+        {presentation === "dialog" ? (
+          <DialogContent
+            title={title}
+            busy={busy}
+            onClose={close}
+            contentLayout={contentLayout}
+            scrollRef={scrollRef}
+            contentRef={contentRef}
+            revealField={revealField}
           >
+            {children}
+          </DialogContent>
+        ) : (
+          <SafeAreaView style={s.screen}>
+            <View style={s.modalHeader}>
+              <Text style={[s.sectionTitle, s.flex]}>{title}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="닫기"
+                accessibilityState={{ disabled: busy }}
+                disabled={busy}
+                hitSlop={8}
+                onPress={close}
+                style={({ pressed }) => [
+                  s.modalCloseButton,
+                  (pressed || busy) && { opacity: 0.5 },
+                ]}
+              >
+                <Ionicons name="close" size={26} color={colors.ink} />
+              </Pressable>
+            </View>
+            <KeyboardAvoidingView
+              style={s.flex}
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+            >
+              <ScrollView
+                ref={scrollRef}
+                contentContainerStyle={s.page}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+              >
+                <FormNavigationContext.Provider value={revealField}>
+                  <View
+                    ref={contentRef}
+                    collapsable={false}
+                    style={s.formContent}
+                  >
+                    {children}
+                  </View>
+                </FormNavigationContext.Provider>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          </SafeAreaView>
+        )}
+      </SafeAreaProvider>
+    </Modal>
+  );
+}
+
+function DialogContent({
+  title,
+  children,
+  onClose,
+  busy,
+  contentLayout,
+  scrollRef,
+  contentRef,
+  revealField,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  busy: boolean;
+  contentLayout: "form" | "card";
+  scrollRef: Ref<ScrollView>;
+  contentRef: Ref<View>;
+  revealField: (field: View | null, focus?: () => void) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  return (
+    <View style={s.flex}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${title} 닫기`}
+        accessibilityState={{ disabled: busy }}
+        disabled={busy}
+        onPress={onClose}
+        style={[StyleSheet.absoluteFill, s.dialogBackdrop]}
+      />
+      <KeyboardAvoidingView
+        style={s.flex}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        pointerEvents="box-none"
+      >
+        <View
+          style={[
+            s.dialogOverlay,
+            {
+              paddingTop: insets.top + 22,
+              paddingBottom: insets.bottom + 22,
+              paddingLeft: insets.left + 22,
+              paddingRight: insets.right + 22,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          <View
+            accessibilityViewIsModal
+            accessibilityLabel={title}
+            onAccessibilityEscape={onClose}
+            style={[
+              s.dialog,
+              {
+                maxHeight: Math.max(
+                  0,
+                  Math.min(
+                    height * 0.8,
+                    height - insets.top - insets.bottom - 44,
+                  ),
+                ),
+              },
+            ]}
+          >
+            <View style={[s.modalHeader, s.dialogHeader]}>
+              <Text style={[s.sectionTitle, s.flex]}>{title}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="닫기"
+                accessibilityState={{ disabled: busy }}
+                disabled={busy}
+                onPress={onClose}
+                style={({ pressed }) => [
+                  s.modalCloseButton,
+                  (pressed || busy) && { opacity: 0.5 },
+                ]}
+              >
+                <Ionicons
+                  name="close"
+                  size={26}
+                  color={colors.ink}
+                  accessible={false}
+                />
+              </Pressable>
+            </View>
             <ScrollView
               ref={scrollRef}
-              contentContainerStyle={s.page}
+              style={s.dialogScroll}
+              contentContainerStyle={s.dialogContent}
+              showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
@@ -288,23 +452,26 @@ export function FormModal({
                 <View
                   ref={contentRef}
                   collapsable={false}
-                  style={s.formContent}
+                  style={[
+                    s.formContent,
+                    contentLayout === "form" && s.dialogFormContent,
+                  ]}
                 >
                   {children}
                 </View>
               </FormNavigationContext.Provider>
             </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </SafeAreaProvider>
-    </Modal>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 export function Field({
   label,
   labelLeading,
-  inlineLabel = false,
+  inlineLabel = true,
   unit,
   value,
   onChangeText,
@@ -474,14 +641,22 @@ export const s = StyleSheet.create({
     minHeight: 46,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: colors.blue,
+    backgroundColor: colors.softBlue,
     borderRadius: 13,
     justifyContent: "center",
     alignItems: "center",
   },
-  secondary: { backgroundColor: colors.softBlue },
-  danger: { backgroundColor: "#FFF0F2" },
-  buttonText: { color: colors.white, fontSize: 15, fontWeight: "700" },
+  secondary: { backgroundColor: colors.line },
+  danger: { backgroundColor: colors.softRed },
+  groupedButton: { flexGrow: 1 },
+  buttonGroup: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  buttonGroupItem: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 80,
+    maxWidth: "100%",
+  },
+  buttonText: { color: colors.blue, fontSize: 15, fontWeight: "700" },
   textLink: {
     color: colors.blue,
     fontSize: 14,
@@ -530,6 +705,31 @@ export const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  dialogOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dialogBackdrop: {
+    backgroundColor: "rgba(32, 36, 56, 0.25)",
+  },
+  dialog: {
+    width: "100%",
+    maxWidth: 596,
+    alignSelf: "center",
+    flexShrink: 1,
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  dialogHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 0,
+    borderBottomWidth: 0,
+  },
+  dialogScroll: { flexGrow: 0, flexShrink: 1 },
+  dialogContent: { width: "100%" },
+  dialogFormContent: { padding: 20 },
   field: { gap: 8 },
   inlineField: {
     flexDirection: "row",

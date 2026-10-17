@@ -16,7 +16,6 @@ import {
 import { colors } from "./theme";
 
 export const FONT_ASSETS = {
-  "Quicksand-Bold": require("../../assets/fonts/Quicksand-Bold.ttf"),
   "Pretendard-Regular": require("../../assets/fonts/Pretendard-Regular.otf"),
   "Pretendard-Medium": require("../../assets/fonts/Pretendard-Medium.otf"),
   "Pretendard-SemiBold": require("../../assets/fonts/Pretendard-SemiBold.otf"),

@@ -1,12 +1,6 @@
 import { AppText as Text } from "./typography";
 import { useMemo, useState, type ReactNode } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  View,
-} from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import type { CardBenefitMonth, LedgerEntry } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
@@ -47,6 +41,7 @@ export function ExpenseCalendarView({
   const { entries } = ledger;
   const loading = ledger.loading || cardBenefits.loading;
   const error = ledger.error || cardBenefits.error;
+  const ready = active && !busy && !loading && !error;
   function retry() {
     ledger.retry();
     cardBenefits.retry();
@@ -54,7 +49,8 @@ export function ExpenseCalendarView({
   const summary = useMemo(() => ledgerSummary(entries), [entries]);
   const benefitSummary = cardBenefitMonthSummary(cardBenefits.snapshot);
   const benefits = benefitSummary.total;
-  const benefitLabel = benefitSummary.confirmed ? "확정 혜택" : "예상 혜택";
+  const benefitLabel =
+    ready && benefitSummary.confirmed ? "확정 혜택" : "예상 혜택";
   const estimatedAmount = summary.total - benefits;
   const lastDay = daysInMonth(month);
   const selectedEntries = useMemo(
@@ -72,7 +68,7 @@ export function ExpenseCalendarView({
     <>
       <Screen scrollable={false}>
         <FlatList
-          data={loading || error ? [] : selectedEntries}
+          data={ready ? selectedEntries : []}
           keyExtractor={(entry) => String(entry.id)}
           style={s.flex}
           contentContainerStyle={[s.page, styles.page]}
@@ -134,86 +130,100 @@ export function ExpenseCalendarView({
                   <Text style={styles.todayLabel}>오늘</Text>
                 </Pressable>
               </View>
-              {loading ? (
-                <View style={styles.loading}>
-                  <ActivityIndicator color={colors.blue} />
-                  <Text style={s.caption}>월별 내역을 불러오고 있어요.</Text>
+              <View
+                style={styles.summary}
+                accessibilityState={{ busy: loading }}
+              >
+                <View style={styles.summaryRow}>
+                  <View style={styles.summaryLabelGroup}>
+                    <Text style={styles.summaryLabel}>월 지출 합계</Text>
+                    {ready && summary.pending > 0 ? (
+                      <View style={styles.pendingBadge}>
+                        <Text style={styles.pendingLabel}>
+                          미입력 {summary.pending}건
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.count}>
+                        {ready ? `${summary.count}건` : "—"}
+                      </Text>
+                    )}
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    style={styles.summaryValue}
+                    accessibilityLabel={
+                      ready
+                        ? `월 지출 합계 ${money(summary.total)}, 전체 ${summary.count}건, 미입력 ${summary.pending}건`
+                        : "월 지출 합계 조회 전"
+                    }
+                  >
+                    {ready ? money(summary.total) : "—"}
+                  </Text>
                 </View>
-              ) : error ? (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>{benefitLabel}</Text>
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    style={styles.summaryValue}
+                    accessibilityLabel={
+                      ready
+                        ? `${benefitLabel} ${money(benefits)} 차감`
+                        : `${benefitLabel} 조회 전`
+                    }
+                  >
+                    {ready && benefits > 0 ? "−" : ""}
+                    {ready ? money(benefits) : "—"}
+                  </Text>
+                </View>
+                <View style={[styles.summaryRow, styles.estimateRow]}>
+                  <Text style={styles.estimateLabel}>혜택 반영 예상액</Text>
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    style={styles.estimateValue}
+                    accessibilityLabel={
+                      ready
+                        ? `혜택 반영 예상액 ${money(estimatedAmount)}`
+                        : "혜택 반영 예상액 조회 전"
+                    }
+                  >
+                    {ready ? money(estimatedAmount) : "—"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.calendarSection}>
+                <LedgerCalendar
+                  month={month}
+                  entries={ready ? entries : []}
+                  dataReady={ready}
+                  selectedDay={selectedDay}
+                  onSelect={setSelectedDay}
+                  benefitsConfirmed={ready && benefitSummary.confirmed}
+                  benefitsPending={ready && benefitSummary.pending > 0}
+                />
+              </View>
+              <View style={styles.dayHeader}>
+                <Text style={[s.flex, styles.dayTitle]}>
+                  {monthIndex + 1}월 {selectedDay}일
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={styles.dayTotal}
+                >
+                  {ready ? money(daySummary.total) : "—"}
+                </Text>
+              </View>
+              {error && (
                 <View style={s.card}>
                   <Text accessibilityRole="alert" style={s.error}>
                     {error}
                   </Text>
                   <Button label="다시 시도" secondary onPress={retry} />
                 </View>
-              ) : (
-                <>
-                  <View style={styles.summary}>
-                    <View style={styles.summaryRow}>
-                      <View style={styles.summaryLabelGroup}>
-                        <Text style={styles.summaryLabel}>월 지출 합계</Text>
-                        {summary.pending > 0 ? (
-                          <View style={styles.pendingBadge}>
-                            <Text style={styles.pendingLabel}>
-                              미입력 {summary.pending}건
-                            </Text>
-                          </View>
-                        ) : (
-                          <Text style={styles.count}>{summary.count}건</Text>
-                        )}
-                      </View>
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        style={styles.summaryValue}
-                        accessibilityLabel={`월 지출 합계 ${money(summary.total)}, 전체 ${summary.count}건, 미입력 ${summary.pending}건`}
-                      >
-                        {money(summary.total)}
-                      </Text>
-                    </View>
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryLabel}>{benefitLabel}</Text>
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        style={styles.summaryValue}
-                        accessibilityLabel={`${benefitLabel} ${money(benefits)} 차감`}
-                      >
-                        {benefits > 0 ? "−" : ""}
-                        {money(benefits)}
-                      </Text>
-                    </View>
-                    <View style={[styles.summaryRow, styles.estimateRow]}>
-                      <Text style={styles.estimateLabel}>혜택 반영 예상액</Text>
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        style={styles.estimateValue}
-                        accessibilityLabel={`혜택 반영 예상액 ${money(estimatedAmount)}`}
-                      >
-                        {money(estimatedAmount)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.calendarSection}>
-                    <LedgerCalendar
-                      month={month}
-                      entries={entries}
-                      selectedDay={selectedDay}
-                      onSelect={setSelectedDay}
-                      benefitsConfirmed={benefitSummary.confirmed}
-                      benefitsPending={benefitSummary.pending > 0}
-                    />
-                  </View>
-                  <View style={styles.dayHeader}>
-                    <Text style={s.sectionTitle}>
-                      {monthIndex + 1}월 {selectedDay}일
-                    </Text>
-                    <Text style={styles.dayTotal}>
-                      {money(daySummary.total)}
-                    </Text>
-                  </View>
-                </>
               )}
             </View>
           }
@@ -227,14 +237,17 @@ export function ExpenseCalendarView({
             >
               <LedgerEntryRow
                 entry={item}
-                disabled={busy}
-                onPress={() => setEditing(item)}
+                disabled={busy || !ready}
+                onPress={() => {
+                  if (busy || !ready) return;
+                  setEditing(item);
+                }}
               />
             </View>
           )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
-            !loading && !error && selectedDay !== lastDay ? (
+            ready && selectedDay !== lastDay ? (
               <Empty
                 icon="calendar-outline"
                 title={
@@ -251,7 +264,7 @@ export function ExpenseCalendarView({
             ) : null
           }
           ListFooterComponent={
-            !loading && !error ? (
+            ready ? (
               <View>
                 {selectedDay === lastDay && cardBenefits.snapshot && (
                   <Pressable
@@ -308,6 +321,12 @@ export function ExpenseCalendarView({
       {settling && (
         <FormModal
           title="카드 혜택 정산"
+          presentation={
+            settling.cards.filter((card) => card.benefitTypeCode === "variable")
+              .length <= 1
+              ? "dialog"
+              : "full_screen"
+          }
           busy={busy}
           onClose={() => setSettling(null)}
         >
@@ -321,6 +340,7 @@ export function ExpenseCalendarView({
       {adding && (
         <FormModal
           title="고정비 추가"
+          presentation="full_screen"
           busy={busy}
           onClose={() => setAdding(false)}
         >
@@ -330,6 +350,7 @@ export function ExpenseCalendarView({
       {editing && (
         <FormModal
           title="변동 금액 입력"
+          presentation="dialog"
           busy={busy}
           onClose={() => setEditing(null)}
         >
@@ -460,19 +481,28 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   settlementCaption: { fontSize: 11, lineHeight: 18, color: colors.muted },
-  loading: { alignItems: "center", paddingVertical: 48 },
   dayHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
     paddingTop: 4,
+    paddingHorizontal: 12,
+  },
+  dayTitle: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: colors.ink,
   },
   dayTotal: {
+    flexShrink: 1,
+    textAlign: "right",
     fontSize: 14,
     lineHeight: 20,
-    fontWeight: "700",
-    color: colors.ink,
+    fontWeight: "600",
+    color: colors.muted,
+    fontVariant: ["tabular-nums"],
   },
   entryGroupRow: { overflow: "hidden" },
   entryGroupFirst: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },

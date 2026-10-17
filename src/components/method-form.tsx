@@ -333,11 +333,12 @@ export function MethodForm({
             <Field
               label={
                 benefitTypeCode === "fixed"
-                  ? "월 고정 혜택 (원)"
+                  ? "월 고정 혜택"
                   : benefitTypeCode === "variable"
-                    ? "월 변동 혜택 예상액 (원)"
-                    : "월 혜택 금액 (원)"
+                    ? "월 예상 혜택"
+                    : "월 혜택 금액"
               }
+              unit="원"
               value={benefitAmount}
               numeric
               maxLength={13}

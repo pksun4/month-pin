@@ -65,7 +65,8 @@ export function YearEndSalaryForm({
       </Text>
       <View ref={containerRef} collapsable={false}>
         <Field
-          label="총급여 (비과세 제외)"
+          label="총급여"
+          unit="원"
           value={value}
           onChangeText={(next) => {
             setValue((previous) => formatAmountInput(next, previous));

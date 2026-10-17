@@ -10,6 +10,7 @@ export function ChargeDayField({
   onChange,
   disabled,
   label = "결제일",
+  hint = "매월 · 1~31일",
   required,
   error,
   onBlur,
@@ -19,6 +20,7 @@ export function ChargeDayField({
   onChange: (value: string) => void;
   disabled: boolean;
   label?: string;
+  hint?: string;
   required?: boolean;
   error?: string;
   onBlur?: () => void;
@@ -42,7 +44,7 @@ export function ChargeDayField({
           style={[
             s.fieldLabel,
             styles.label,
-            !stacked && { width: 68 * fontScale },
+            !stacked && { width: 96 * fontScale },
           ]}
         />
         <View style={styles.controls}>
@@ -86,10 +88,9 @@ export function ChargeDayField({
               <Text style={styles.unit}>일</Text>
             </View>
           </View>
-          <Text style={styles.hint}>매월 · 1~31일</Text>
         </View>
       </View>
-      <FieldMessage error={message} />
+      <FieldMessage error={message} hint={hint} />
     </View>
   );
 }
@@ -100,11 +101,10 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
     flexShrink: 1,
   },
   label: { lineHeight: 22, includeFontPadding: false },
-  inputContainer: { paddingVertical: 0 },
+  inputContainer: { paddingVertical: 0, maxWidth: "100%" },
   inputSlot: { flex: 1, minWidth: 0 },
   input: {
     flex: 1,
@@ -122,7 +122,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     includeFontPadding: false,
   },
-  hint: { flexShrink: 1, color: colors.muted, fontSize: 12, lineHeight: 18 },
   focused: { borderColor: colors.blue },
   dimmed: { opacity: 0.6 },
 });

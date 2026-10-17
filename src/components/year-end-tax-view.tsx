@@ -1,11 +1,5 @@
 import { useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { AppText as Text } from "./typography";
 import { Button, colors, FormModal, s } from "./ui";
@@ -41,6 +35,7 @@ type TaxModal =
       amounts: TaxSpendingAmounts | null;
       cards: TaxCardSpending[];
       selectedCards: YearEndTaxCard[];
+      confirmed: boolean;
     }
   | null;
 
@@ -55,14 +50,23 @@ export function YearEndTaxView({
 }) {
   const { snapshot, loading, error, retry } = useYearEndTax(year, active);
   const { busy } = useMonthPin();
-  const [modal, setModal] = useState<TaxModal>(null);
+  const [modalState, setModalState] = useState<{
+    year: number;
+    value: TaxModal;
+  }>({ year, value: null });
+  // Reset only the editor state when the year changes, keeping the page mounted.
+  if (modalState.year !== year) {
+    setModalState({ year, value: null });
+  }
+  const modal = modalState.year === year ? modalState.value : null;
+  const setModal = (value: TaxModal) => setModalState({ year, value });
   const target = snapshot ? cardSpendingTarget(snapshot.grossSalary) : null;
   const remaining = snapshot
     ? remainingTaxTarget(snapshot.grossSalary, snapshot.months)
     : null;
   const monthDisabled = busy || loading || !!error || !snapshot || !active;
   const salaryActionLabel =
-    snapshot?.grossSalary === null ? "연봉 입력" : "연봉 수정";
+    snapshot?.grossSalary == null ? "연봉 입력" : "연봉 수정";
   return (
     <>
       <ScrollView
@@ -70,95 +74,83 @@ export function YearEndTaxView({
         contentContainerStyle={[s.page, styles.page]}
         showsVerticalScrollIndicator={false}
       >
-        {loading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={colors.blue} />
-            <Text style={s.caption}>연말정산 정보를 불러오고 있어요.</Text>
+        <View style={styles.target} accessibilityState={{ busy: loading }}>
+          <View style={styles.targetMetrics}>
+            <View style={styles.targetMetric}>
+              <Text style={styles.targetLabel}>목표금액</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={styles.targetAmount}
+                accessibilityLabel={`목표금액 ${!snapshot ? (loading ? "조회 중" : "조회 전") : target === null ? "총급여 입력 전" : money(target)}`}
+              >
+                {target === null ? "—" : money(target)}
+              </Text>
+            </View>
+            <View style={styles.targetMetric}>
+              <Text style={styles.targetLabel}>잔여금액</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                style={[styles.targetAmount, styles.remainingAmount]}
+                accessibilityLabel={`잔여금액 ${!snapshot ? (loading ? "조회 중" : "조회 전") : remaining === null ? "총급여 입력 전" : `${money(remaining)}, 입력한 월 기준`}`}
+              >
+                {remaining === null ? "—" : money(remaining)}
+              </Text>
+            </View>
           </View>
-        ) : error ? (
+          <View style={styles.targetFooter}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="사용금액 소득공제율 안내"
+              accessibilityHint="결제수단별 기본 공제율과 계산 기준을 확인해요."
+              accessibilityState={{ disabled: busy }}
+              disabled={busy}
+              onPress={() => setModal({ code: "deduction_guide" })}
+              style={({ pressed }) => [
+                styles.helpButton,
+                (pressed || busy) && styles.dimmed,
+              ]}
+            >
+              <Text style={[s.caption, styles.targetHintText]}>
+                총급여의 25%
+              </Text>
+              <View style={styles.helpLabelRow}>
+                <Text style={[s.caption, styles.targetHintText]}>
+                  사용금액 소득공제 기준
+                </Text>
+                <Ionicons
+                  name="help-circle-outline"
+                  size={14}
+                  color={colors.muted}
+                  style={styles.helpIcon}
+                  accessible={false}
+                />
+              </View>
+            </Pressable>
+            <View style={styles.salaryAction}>
+              <CompactActionButton
+                label={salaryActionLabel}
+                size="small"
+                icon={snapshot?.grossSalary == null ? "add" : "create-outline"}
+                accessibilityLabel={`${year}년 ${salaryActionLabel}`}
+                disabled={monthDisabled}
+                onPress={() => {
+                  if (monthDisabled || !snapshot) return;
+                  setModal({ code: "salary", settings: snapshot });
+                }}
+              />
+            </View>
+          </View>
+        </View>
+        {error && (
           <View style={s.card}>
             <Text accessibilityRole="alert" style={s.error}>
               {error}
             </Text>
             <Button label="다시 시도" secondary onPress={retry} />
           </View>
-        ) : snapshot ? (
-          <View style={styles.target}>
-            <View style={styles.targetMetrics}>
-              <View style={styles.targetMetric}>
-                <Text style={styles.targetLabel}>목표금액</Text>
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  style={styles.targetAmount}
-                  accessibilityLabel={`목표금액 ${target === null ? "총급여 입력 전" : money(target)}`}
-                >
-                  {target === null ? "—" : money(target)}
-                </Text>
-              </View>
-              <View style={styles.targetMetric}>
-                <Text style={styles.targetLabel}>잔여금액</Text>
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  style={[styles.targetAmount, styles.remainingAmount]}
-                  accessibilityLabel={`잔여금액 ${remaining === null ? "총급여 입력 전" : `${money(remaining)}, 입력한 월 기준`}`}
-                >
-                  {remaining === null ? "—" : money(remaining)}
-                </Text>
-              </View>
-            </View>
-            {target === null && (
-              <Text style={styles.explanation}>
-                총급여를 입력하면 목표금액을 계산해요.
-              </Text>
-            )}
-            <View style={styles.targetFooter}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="사용금액 소득공제율 안내"
-                accessibilityHint="결제수단별 기본 공제율과 계산 기준을 확인해요."
-                accessibilityState={{ disabled: busy }}
-                disabled={busy}
-                onPress={() => setModal({ code: "deduction_guide" })}
-                style={({ pressed }) => [
-                  styles.helpButton,
-                  (pressed || busy) && styles.dimmed,
-                ]}
-              >
-                <Text style={[s.caption, styles.targetHintText]}>
-                  총급여의 25%
-                </Text>
-                <View style={styles.helpLabelRow}>
-                  <Text style={[s.caption, styles.targetHintText]}>
-                    사용금액 소득공제 기준
-                  </Text>
-                  <Ionicons
-                    name="help-circle-outline"
-                    size={14}
-                    color={colors.muted}
-                    style={styles.helpIcon}
-                    accessible={false}
-                  />
-                </View>
-              </Pressable>
-              <View style={styles.salaryAction}>
-                <CompactActionButton
-                  label={salaryActionLabel}
-                  size="small"
-                  icon={
-                    snapshot.grossSalary === null ? "add" : "create-outline"
-                  }
-                  accessibilityLabel={`${year}년 ${salaryActionLabel}`}
-                  disabled={busy}
-                  onPress={() =>
-                    setModal({ code: "salary", settings: snapshot })
-                  }
-                />
-              </View>
-            </View>
-          </View>
-        ) : null}
+        )}
         <View style={styles.monthSection}>
           <YearSelector
             year={year}
@@ -168,6 +160,8 @@ export function YearEndTaxView({
               <CompactActionButton
                 label={`카드 선택 · ${snapshot ? `${snapshot.selectedCards?.length ?? 0}개` : "—"}`}
                 icon="card-outline"
+                size="small"
+                secondary
                 accessibilityLabel={`${year}년 연말정산 카드 선택, ${snapshot ? `${snapshot.selectedCards?.length ?? 0}개 선택됨` : "조회 전"}`}
                 disabled={monthDisabled}
                 onPress={() => {
@@ -192,11 +186,12 @@ export function YearEndTaxView({
                     (item) => item.month === month,
                   );
                   const amount = entry ? taxEntryTotal(entry) : null;
+                  const confirmed = entry?.confirmed === true;
                   return (
                     <Pressable
                       key={month}
                       accessibilityRole="button"
-                      accessibilityLabel={`${year}년 ${month}월 사용금액 ${!snapshot ? "조회 전" : amount === null ? "미입력, 입력" : `${money(amount)}, 수정`}`}
+                      accessibilityLabel={`${year}년 ${month}월 사용금액 ${!snapshot ? "조회 전" : amount === null ? "미입력, 입력" : `${money(amount)}, ${confirmed ? "확정, " : ""}수정`}`}
                       accessibilityState={{ disabled: monthDisabled }}
                       disabled={monthDisabled}
                       onPress={() => {
@@ -208,10 +203,12 @@ export function YearEndTaxView({
                           amounts: entry?.amounts ?? null,
                           cards: entry?.cards ?? [],
                           selectedCards: snapshot?.selectedCards ?? [],
+                          confirmed,
                         });
                       }}
                       style={({ pressed }) => [
                         styles.monthCell,
+                        confirmed && styles.monthConfirmed,
                         (pressed || busy) && styles.dimmed,
                       ]}
                     >
@@ -237,6 +234,7 @@ export function YearEndTaxView({
       {modal?.code === "cards" && active && modal.year === year && (
         <FormModal
           title={`${year}년 연말정산 카드`}
+          presentation="dialog"
           busy={busy}
           onClose={() => setModal(null)}
         >
@@ -250,6 +248,7 @@ export function YearEndTaxView({
       {modal?.code === "spending" && active && modal.year === year && (
         <FormModal
           title={`${year}년 ${modal.month}월 사용금액`}
+          presentation="full_screen"
           busy={busy}
           onClose={() => setModal(null)}
         >
@@ -260,6 +259,7 @@ export function YearEndTaxView({
             amounts={modal.amounts}
             cards={modal.cards}
             selectedCards={modal.selectedCards}
+            confirmed={modal.confirmed}
             onClose={() => setModal(null)}
           />
         </FormModal>
@@ -267,6 +267,7 @@ export function YearEndTaxView({
       {modal?.code === "salary" && active && modal.settings.year === year && (
         <FormModal
           title={`${year}년 총급여`}
+          presentation="dialog"
           busy={busy}
           onClose={() => setModal(null)}
         >
@@ -279,6 +280,7 @@ export function YearEndTaxView({
       {modal?.code === "deduction_guide" && active && (
         <FormModal
           title="사용금액 소득공제 안내"
+          presentation="full_screen"
           onClose={() => setModal(null)}
         >
           <YearEndTaxGuide />
@@ -290,7 +292,6 @@ export function YearEndTaxView({
 
 const styles = StyleSheet.create({
   page: { paddingTop: 20, paddingBottom: 12, gap: 16 },
-  loading: { alignItems: "center", paddingVertical: 48, gap: 12 },
   target: {
     borderRadius: 14,
     paddingHorizontal: 16,
@@ -310,7 +311,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   helpIcon: { lineHeight: 18, flexShrink: 0 },
-  explanation: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   helpButton: {
     minHeight: 44,
     flex: 1,
@@ -347,17 +347,20 @@ const styles = StyleSheet.create({
     minHeight: 80,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    padding: 12,
+    gap: 8,
+    padding: 11,
     backgroundColor: colors.white,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   monthLabel: {
-    color: colors.ink,
-    fontSize: 13,
-    lineHeight: 20,
-    fontWeight: "600",
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "500",
   },
+  monthConfirmed: { borderColor: colors.blueLine },
   monthAmount: {
     maxWidth: "100%",
     color: colors.muted,
@@ -365,6 +368,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontVariant: ["tabular-nums"],
   },
-  monthEntered: { color: colors.ink, fontWeight: "600" },
+  monthEntered: { color: colors.ink, fontWeight: "700" },
   dimmed: { opacity: 0.6 },
 });

@@ -33,7 +33,7 @@ export function FormSelect<Code extends string | number | null>({
   onChange,
   placeholder = "선택해 주세요",
   disabled = false,
-  inlineLabel = false,
+  inlineLabel = true,
   required,
   error,
   hint,
@@ -84,7 +84,7 @@ export function FormSelect<Code extends string | number | null>({
         <FieldLabel
           label={label}
           required={required}
-          style={inline ? { width: 68 * fontScale } : undefined}
+          style={inline ? { width: 96 * fontScale } : undefined}
         />
         <Pressable
           ref={controlRef}

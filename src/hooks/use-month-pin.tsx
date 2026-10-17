@@ -25,7 +25,7 @@ import type {
   CardBenefitInput,
   AnnualSummary,
   YearEndTaxYear,
-  YearEndTaxMonth,
+  YearEndTaxMonthInput,
 } from "../data/models";
 
 interface Store {
@@ -59,7 +59,7 @@ interface Store {
   loadAnnualSummary: (year: number) => Promise<AnnualSummary>;
   loadYearEndTaxYear: (year: number) => Promise<YearEndTaxYear>;
   saveYearEndTaxSalary: (year: number, grossSalary: number) => Promise<void>;
-  saveYearEndTaxMonth: (entry: YearEndTaxMonth) => Promise<void>;
+  saveYearEndTaxMonth: (entry: YearEndTaxMonthInput) => Promise<void>;
   saveYearEndTaxCards: (
     year: number,
     methodIds: readonly number[],

@@ -33,7 +33,6 @@ function inputFixture(props = {}, forwardedRef = { current: null }) {
   };
   const fontMocks = Object.fromEntries(
     [
-      "Quicksand-Bold.ttf",
       "Pretendard-Regular.otf",
       "Pretendard-Medium.otf",
       "Pretendard-SemiBold.otf",

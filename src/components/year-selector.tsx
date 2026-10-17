@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     columnGap: 8,
   },
-  navigation: { flexDirection: "row", alignItems: "center", gap: 2 },
+  navigation: { flexDirection: "row", alignItems: "center", gap: 1 },
   button: {
     width: 44,
     height: 44,

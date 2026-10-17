@@ -115,9 +115,14 @@ export interface YearEndTaxSettings {
 export interface YearEndTaxMonth {
   year: number;
   month: number;
+  confirmed: boolean;
   amounts: TaxSpendingAmounts;
   cards?: TaxCardSpending[];
 }
+
+export type YearEndTaxMonthInput = Omit<YearEndTaxMonth, "confirmed"> & {
+  confirmed?: boolean;
+};
 
 export interface YearEndTaxCard {
   methodId: number;

@@ -71,6 +71,7 @@ exports.hookRuntime = function hookRuntime(path, mocks) {
       if (name === "expo-router")
         return {
           useFocusEffect: (callback) => effect(callback, [callback], true),
+          ...mocks["expo-router"],
         };
       if (Object.hasOwn(mocks, name)) return mocks[name];
       return require(name);

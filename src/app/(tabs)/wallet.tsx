@@ -39,6 +39,7 @@ import {
 } from "../../components/list-controls";
 import {
   Button,
+  ButtonGroup,
   Empty,
   FormModal,
   Header,
@@ -349,6 +350,7 @@ export default function WalletScreen() {
       </Screen>
       {(form || selected) && (
         <FormModal
+          presentation="full_screen"
           title={
             form
               ? form.method
@@ -441,9 +443,11 @@ export default function WalletScreen() {
                 <View style={s.card}>
                   <Text style={s.sectionTitle}>연결된 고정비</Text>
                   {related.length ? (
-                    related.map((expense) => (
-                      <ExpenseRow key={expense.id} expense={expense} />
-                    ))
+                    <View>
+                      {related.map((expense) => (
+                        <ExpenseRow key={expense.id} expense={expense} />
+                      ))}
+                    </View>
                   ) : (
                     <Text style={s.caption}>아직 연결된 고정비가 없어요.</Text>
                   )}
@@ -452,19 +456,25 @@ export default function WalletScreen() {
                     아니에요.
                   </Text>
                 </View>
-                <Button
-                  label="수정"
-                  disabled={busy}
-                  onPress={() => {
-                    setForm({ method: selected });
-                    setSelected(null);
-                  }}
-                />
-                <Button
-                  label="삭제"
-                  danger
-                  disabled={busy}
-                  onPress={() => remove(selected)}
+                <ButtonGroup
+                  actions={[
+                    {
+                      code: "delete",
+                      label: "삭제",
+                      danger: true,
+                      disabled: busy,
+                      onPress: () => remove(selected),
+                    },
+                    {
+                      code: "edit",
+                      label: "수정",
+                      disabled: busy,
+                      onPress: () => {
+                        setForm({ method: selected });
+                        setSelected(null);
+                      },
+                    },
+                  ]}
                 />
               </>
             )

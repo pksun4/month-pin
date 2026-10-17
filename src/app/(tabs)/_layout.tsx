@@ -25,8 +25,8 @@ const tabs: {
   {
     name: "settlement",
     title: "결산",
-    icon: "bar-chart-outline",
-    activeIcon: "bar-chart",
+    icon: "pie-chart-outline",
+    activeIcon: "pie-chart",
   },
   {
     name: "settings",

@@ -31,7 +31,7 @@ export function useAnnualSummary(year: number, enabled = true) {
               ...request,
               snapshot: null,
               loading: false,
-              error: "연간 요약을 불러오지 못했어요. 다시 시도해 주세요.",
+              error: "고정비 결산을 불러오지 못했어요. 다시 시도해 주세요.",
             });
         });
       return () => {

@@ -17,6 +17,7 @@ export function LedgerCalendar({
   entries,
   selectedDay,
   onSelect,
+  dataReady = true,
   benefitsConfirmed = false,
   benefitsPending = false,
 }: {
@@ -24,12 +25,13 @@ export function LedgerCalendar({
   entries: readonly LedgerEntry[];
   selectedDay: number;
   onSelect: (day: number) => void;
+  dataReady?: boolean;
   benefitsConfirmed?: boolean;
   benefitsPending?: boolean;
 }) {
   const days = calendarDays(month);
   const lastDay = daysInMonth(month);
-  const totals = dailyLedger(entries);
+  const totals = dailyLedger(dataReady ? entries : []);
   const now = new Date();
   const today = monthKey(now) === month ? now.getDate() : null;
   return (
@@ -58,7 +60,7 @@ export function LedgerCalendar({
               <Pressable
                 key={column}
                 accessibilityRole="button"
-                accessibilityLabel={`${month.replace("-", "년 ")}월 ${day}일${day === today ? ", 오늘" : ""}, ${summary?.count ?? 0}건, ${money(summary?.total ?? 0)}${summary?.pending ? `, 금액 미입력 ${summary.pending}건` : ""}${day === lastDay ? `, 카드 혜택 정산 ${benefitsConfirmed ? "확정 완료" : "확정 전"}` : ""}`}
+                accessibilityLabel={`${month.replace("-", "년 ")}월 ${day}일${day === today ? ", 오늘" : ""}, ${dataReady ? `${summary?.count ?? 0}건, ${money(summary?.total ?? 0)}${summary?.pending ? `, 금액 미입력 ${summary.pending}건` : ""}${day === lastDay ? `, 카드 혜택 정산 ${benefitsConfirmed ? "확정 완료" : "확정 전"}` : ""}` : "내역 조회 전"}`}
                 accessibilityState={{ selected }}
                 onPress={() => onSelect(day)}
                 style={({ pressed }) => [
@@ -91,10 +93,10 @@ export function LedgerCalendar({
                   </Text>
                 )}
                 {(!!summary?.pending ||
-                  (day === lastDay && benefitsPending)) && (
+                  (dataReady && day === lastDay && benefitsPending)) && (
                   <View style={styles.indicators}>
                     {!!summary?.pending && <View style={styles.dot} />}
-                    {day === lastDay && benefitsPending && (
+                    {dataReady && day === lastDay && benefitsPending && (
                       <View style={[styles.dot, styles.benefitDot]} />
                     )}
                   </View>

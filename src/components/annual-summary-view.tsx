@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { AppText as Text } from "./typography";
-import { Button, colors, Empty, s } from "./ui";
+import { Button, colors, s } from "./ui";
 import type { AnnualMonthSummary, AnnualSummary } from "../data/models";
 import { useAnnualSummary } from "../hooks/use-annual-summary";
-import { annualTotals } from "../utils/annual-summary";
+import { annualTotals, monthsOfYear } from "../utils/annual-summary";
 import { money } from "../utils/expenses";
 import { YearSelector } from "./year-selector";
 import { useMonthPin } from "../hooks/use-month-pin";
@@ -29,56 +29,59 @@ export function AnnualSummaryView({
       contentContainerStyle={[s.page, styles.page]}
       showsVerticalScrollIndicator={false}
     >
-      {loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={colors.blue} />
-          <Text style={s.caption}>연간 요약을 불러오고 있어요.</Text>
-        </View>
-      ) : error ? (
-        <View style={s.card}>
-          <Text accessibilityRole="alert" style={s.error}>
-            {error}
-          </Text>
-          <Button label="다시 시도" secondary onPress={retry} />
-        </View>
-      ) : snapshot ? (
-        <AnnualSummaryContent snapshot={snapshot} yearSelector={yearSelector} />
-      ) : null}
-      {(loading || error || !snapshot) && yearSelector}
+      <AnnualSummaryContent
+        snapshot={snapshot}
+        year={year}
+        loading={loading}
+        yearSelector={yearSelector}
+        status={
+          error ? (
+            <View style={s.card}>
+              <Text accessibilityRole="alert" style={s.error}>
+                {error}
+              </Text>
+              <Button label="다시 시도" secondary onPress={retry} />
+            </View>
+          ) : null
+        }
+      />
     </ScrollView>
   );
 }
 
 function AnnualSummaryContent({
   snapshot,
+  year,
+  loading,
   yearSelector,
+  status,
 }: {
-  snapshot: AnnualSummary;
+  snapshot: AnnualSummary | null;
+  year: number;
+  loading: boolean;
   yearSelector: ReactNode;
+  status: ReactNode;
 }) {
-  const total = annualTotals(snapshot);
-  if (total.expenseCount === 0 && total.benefitCount === 0)
-    return (
-      <>
-        {yearSelector}
-        <Empty
-          icon="bar-chart-outline"
-          title={`${snapshot.year}년 내역이 없어요`}
-          description="고정비와 카드 혜택을 등록하면 한 해의 흐름을 모아볼 수 있어요."
-        />
-      </>
-    );
+  const total = snapshot ? annualTotals(snapshot) : null;
   return (
     <>
-      <View style={styles.summary}>
-        <SummaryRow label="연간 지출 합계" amount={total.expenseTotal} />
-        <SummaryRow label="카드 혜택" amount={total.benefitTotal} deduction />
+      <View style={styles.summary} accessibilityState={{ busy: loading }}>
+        <SummaryRow
+          label="연간 지출 합계"
+          amount={total?.expenseTotal ?? null}
+        />
+        <SummaryRow
+          label="카드 혜택"
+          amount={total?.benefitTotal ?? null}
+          deduction
+        />
         <SummaryRow
           label="혜택 반영 예상액"
-          amount={total.estimatedTotal}
+          amount={total?.estimatedTotal ?? null}
           emphasized
         />
       </View>
+      {status}
       <View style={styles.monthSection}>
         {yearSelector}
         <View style={styles.months}>
@@ -91,25 +94,32 @@ function AnnualSummaryContent({
               카드 혜택
             </Text>
           </View>
-          {snapshot.months.map((month) => (
-            <AnnualMonthRow key={month.month} month={month} />
+          {monthsOfYear(year).map((monthKey) => (
+            <AnnualMonthRow
+              key={monthKey}
+              monthKey={monthKey}
+              month={
+                snapshot?.months.find((item) => item.month === monthKey) ?? null
+              }
+            />
           ))}
         </View>
       </View>
-      {(total.pendingExpenses > 0 || total.pendingBenefitMonths > 0) && (
-        <View style={styles.notes}>
-          {total.pendingExpenses > 0 && (
-            <Text style={styles.expensePending}>
-              금액 미입력 {total.pendingExpenses}건 · 합계 제외
-            </Text>
-          )}
-          {total.pendingBenefitMonths > 0 && (
-            <Text style={styles.benefitPending}>
-              혜택 미확정 {total.pendingBenefitMonths}개월 · 예상액 포함
-            </Text>
-          )}
-        </View>
-      )}
+      {total &&
+        (total.pendingExpenses > 0 || total.pendingBenefitMonths > 0) && (
+          <View style={styles.notes}>
+            {total.pendingExpenses > 0 && (
+              <Text style={styles.expensePending}>
+                금액 미입력 {total.pendingExpenses}건 · 합계 제외
+              </Text>
+            )}
+            {total.pendingBenefitMonths > 0 && (
+              <Text style={styles.benefitPending}>
+                혜택 미확정 {total.pendingBenefitMonths}개월 · 예상액 포함
+              </Text>
+            )}
+          </View>
+        )}
     </>
   );
 }
@@ -121,7 +131,7 @@ function SummaryRow({
   deduction = false,
 }: {
   label: string;
-  amount: number;
+  amount: number | null;
   emphasized?: boolean;
   deduction?: boolean;
 }) {
@@ -135,30 +145,44 @@ function SummaryRow({
         adjustsFontSizeToFit
         style={[styles.summaryValue, emphasized && styles.estimateValue]}
         accessibilityLabel={
-          deduction ? `${label} ${money(amount)} 차감` : undefined
+          amount === null
+            ? `${label} 조회 전`
+            : deduction
+              ? `${label} ${money(amount)} 차감`
+              : undefined
         }
       >
-        {deduction && amount > 0 ? "−" : ""}
-        {money(amount)}
+        {deduction && amount !== null && amount > 0 ? "−" : ""}
+        {amount === null ? "—" : money(amount)}
       </Text>
     </View>
   );
 }
 
-function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
-  const label = `${Number(month.month.slice(5))}월`;
+function AnnualMonthRow({
+  month,
+  monthKey,
+}: {
+  month: AnnualMonthSummary | null;
+  monthKey: string;
+}) {
+  const label = `${Number(monthKey.slice(5))}월`;
   return (
     <View
       accessible
-      accessibilityLabel={`${label}, 지출 합계 ${money(month.expenseTotal)}, 변동비 미입력 ${month.pendingExpenses}건, 카드 혜택 ${money(month.benefitTotal)} 차감, 혜택 미확정 ${month.pendingBenefits}개`}
+      accessibilityLabel={
+        month
+          ? `${label}, 지출 합계 ${month?.expenseCount ? money(month.expenseTotal) : "내역 없음"}, 변동비 미입력 ${month.pendingExpenses}건, 카드 혜택 ${month.benefitCount ? `${money(month.benefitTotal)} 차감` : "내역 없음"}, 혜택 미확정 ${month.pendingBenefits}개`
+          : `${label}, 조회 전`
+      }
       style={styles.monthRow}
     >
       <Text style={[styles.monthName, styles.monthColumn]}>{label}</Text>
       <View style={styles.amountColumn}>
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.amount}>
-          {month.expenseCount ? money(month.expenseTotal) : "—"}
+          {month?.expenseCount ? money(month.expenseTotal) : "—"}
         </Text>
-        {month.pendingExpenses > 0 && (
+        {!!month && month.pendingExpenses > 0 && (
           <Text style={styles.expensePending}>
             미입력 {month.pendingExpenses}건
           </Text>
@@ -166,11 +190,11 @@ function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
       </View>
       <View style={styles.amountColumn}>
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.amount}>
-          {month.benefitCount
+          {month?.benefitCount
             ? `${month.benefitTotal > 0 ? "−" : ""}${money(month.benefitTotal)}`
             : "—"}
         </Text>
-        {month.pendingBenefits > 0 && (
+        {!!month && month.pendingBenefits > 0 && (
           <Text style={styles.benefitPending}>예상 포함</Text>
         )}
       </View>
@@ -180,7 +204,6 @@ function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
 
 const styles = StyleSheet.create({
   page: { paddingTop: 20, gap: 16 },
-  loading: { alignItems: "center", paddingVertical: 48, gap: 12 },
   summary: {
     backgroundColor: colors.white,
     borderRadius: 14,
