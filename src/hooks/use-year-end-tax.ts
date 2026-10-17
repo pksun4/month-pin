@@ -1,15 +1,15 @@
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
-import type { YearEndTaxSettings } from "../data/models";
+import type { YearEndTaxYear } from "../data/models";
 import { useMonthPin } from "./use-month-pin";
 
 export function useYearEndTax(year: number, enabled = true) {
-  const { loadYearEndTaxSettings, dataRevision, busy } = useMonthPin();
+  const { loadYearEndTaxYear, dataRevision, busy } = useMonthPin();
   const [data, setData] = useState<{
     year: number;
     revision: number;
     attempt: number;
-    snapshot: YearEndTaxSettings | null;
+    snapshot: YearEndTaxYear | null;
     loading: boolean;
     error: string | null;
   } | null>(null);
@@ -20,7 +20,7 @@ export function useYearEndTax(year: number, enabled = true) {
       let current = true;
       const request = { year, revision: dataRevision, attempt };
       setData({ ...request, snapshot: null, loading: true, error: null });
-      void loadYearEndTaxSettings(year)
+      void loadYearEndTaxYear(year)
         .then((snapshot) => {
           if (current)
             setData({ ...request, snapshot, loading: false, error: null });
@@ -37,7 +37,7 @@ export function useYearEndTax(year: number, enabled = true) {
       return () => {
         current = false;
       };
-    }, [year, loadYearEndTaxSettings, dataRevision, attempt, enabled, busy]),
+    }, [year, loadYearEndTaxYear, dataRevision, attempt, enabled, busy]),
   );
   const current =
     enabled &&

@@ -4,8 +4,6 @@ import { AnnualSummaryView } from "../../components/annual-summary-view";
 import { YearEndTaxView } from "../../components/year-end-tax-view";
 import { ListTabs } from "../../components/list-controls";
 import { Header, Screen, s } from "../../components/ui";
-import { YearSelector } from "../../components/year-selector";
-import { useMonthPin } from "../../hooks/use-month-pin";
 import {
   SETTLEMENT_VIEWS,
   type SettlementViewCode,
@@ -14,7 +12,6 @@ import {
 export default function SettlementScreen() {
   const [view, setView] = useState<SettlementViewCode>("annual_summary");
   const [year, setYear] = useState(() => new Date().getFullYear());
-  const { busy } = useMonthPin();
   return (
     <Screen scrollable={false}>
       <View style={styles.header}>
@@ -25,9 +22,6 @@ export default function SettlementScreen() {
           value={view}
           onChange={setView}
         />
-        {view === "annual_summary" && (
-          <YearSelector year={year} onChange={setYear} disabled={busy} />
-        )}
       </View>
       <View
         style={[s.flex, view !== "annual_summary" && styles.hidden]}
@@ -36,7 +30,11 @@ export default function SettlementScreen() {
           view === "annual_summary" ? "auto" : "no-hide-descendants"
         }
       >
-        <AnnualSummaryView year={year} active={view === "annual_summary"} />
+        <AnnualSummaryView
+          year={year}
+          onYearChange={setYear}
+          active={view === "annual_summary"}
+        />
       </View>
       <View
         style={[s.flex, view !== "year_end_tax" && styles.hidden]}

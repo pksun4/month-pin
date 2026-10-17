@@ -88,8 +88,18 @@ export function paymentMethodsByKind(
 ): PaymentMethod[] {
   return [
     ...methods.filter((method) => method.kind === "bank"),
-    ...methods.filter((method) => method.kind === "card"),
+    ...sortCardsByType(methods.filter((method) => method.kind === "card")),
   ];
+}
+
+export function sortCardsByType<T extends { cardTypeCode?: string | null }>(
+  cards: readonly T[],
+): T[] {
+  const rank = (code: string | null | undefined) => {
+    const index = CARD_TYPES.findIndex((type) => type.code === code);
+    return index < 0 ? CARD_TYPES.length : index;
+  };
+  return [...cards].sort((a, b) => rank(a.cardTypeCode) - rank(b.cardTypeCode));
 }
 
 export function groupCardMethods(methods: readonly PaymentMethod[]) {

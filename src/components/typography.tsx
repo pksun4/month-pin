@@ -1,13 +1,19 @@
-import { forwardRef } from "react";
+import { forwardRef, useCallback, useRef, useState } from "react";
 import { isLoaded } from "expo-font";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import {
+  Pressable,
   StyleSheet,
   Text as NativeText,
   TextInput as NativeTextInput,
+  View,
+  type StyleProp,
   type TextProps,
   type TextInputProps,
   type TextStyle,
+  type ViewStyle,
 } from "react-native";
+import { colors } from "./theme";
 
 export const FONT_ASSETS = {
   "Quicksand-Bold": require("../../assets/fonts/Quicksand-Bold.ttf"),
@@ -53,14 +59,124 @@ export const AppText = forwardRef<NativeText, TextProps>(function AppText(
   );
 });
 
-export const AppTextInput = forwardRef<NativeTextInput, TextInputProps>(
-  function AppTextInput({ style, ...props }, ref) {
+export type AppTextInputProps = TextInputProps & {
+  clearable?: boolean;
+  containerStyle?: StyleProp<ViewStyle>;
+};
+
+export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
+  function AppTextInput(
+    {
+      style,
+      containerStyle,
+      multiline,
+      clearable = !multiline,
+      value,
+      defaultValue,
+      onChangeText,
+      clearButtonMode,
+      ...props
+    },
+    ref,
+  ) {
+    const inputRef = useRef<NativeTextInput | null>(null);
+    const [draft, setDraft] = useState(defaultValue ?? "");
+    const setInputRef = useCallback(
+      (input: NativeTextInput | null) => {
+        inputRef.current = input;
+        const cleanup: unknown =
+          typeof ref === "function" ? ref(input) : undefined;
+        if (ref && typeof ref !== "function") ref.current = input;
+        return () => {
+          inputRef.current = null;
+          if (typeof cleanup === "function") cleanup();
+          else if (typeof ref === "function") ref(null);
+          else if (ref) ref.current = null;
+        };
+      },
+      [ref],
+    );
+    const canClear =
+      clearable &&
+      props.editable !== false &&
+      !props.readOnly &&
+      !props.accessibilityState?.disabled &&
+      (value === undefined || !!onChangeText);
+    const hasValue = (value ?? draft).length > 0;
+    const flattened = StyleSheet.flatten(style);
+    const endPadding =
+      flattened?.paddingRight ??
+      flattened?.paddingEnd ??
+      flattened?.paddingHorizontal ??
+      flattened?.padding ??
+      0;
+    const label = props.accessibilityLabel ?? props.placeholder ?? "입력 내용";
+
     return (
-      <NativeTextInput
-        {...props}
-        ref={ref}
-        style={[style, fontForStyle(style)]}
-      />
+      <View style={[inputStyles.container, containerStyle]}>
+        <NativeTextInput
+          {...props}
+          ref={setInputRef}
+          value={value}
+          defaultValue={defaultValue}
+          multiline={multiline}
+          clearButtonMode={clearable ? "never" : clearButtonMode}
+          onChangeText={(next) => {
+            if (value === undefined) setDraft(next);
+            onChangeText?.(next);
+          }}
+          style={[
+            inputStyles.input,
+            style,
+            canClear && { paddingRight: Math.max(Number(endPadding) || 0, 44) },
+            fontForStyle(style),
+          ]}
+        />
+        {canClear && hasValue && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${label} 지우기`}
+            accessibilityHint="입력 내용을 모두 지우고 다시 입력해요."
+            onPress={() => {
+              if (value === undefined) {
+                inputRef.current?.clear();
+                setDraft("");
+              }
+              onChangeText?.("");
+              inputRef.current?.focus();
+            }}
+            style={({ pressed }) => [
+              inputStyles.clear,
+              pressed && inputStyles.pressed,
+            ]}
+          >
+            <Ionicons
+              name="close-circle"
+              size={18}
+              color={colors.muted}
+              style={inputStyles.clearIcon}
+              accessible={false}
+            />
+          </Pressable>
+        )}
+      </View>
     );
   },
 );
+
+const inputStyles = StyleSheet.create({
+  container: { flexDirection: "row", alignItems: "center", minWidth: 0 },
+  input: { flex: 1, minWidth: 0 },
+  clear: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // 터치 영역은 유지하고 아이콘만 입력값 쪽으로 4 이동합니다.
+  clearIcon: { marginRight: 8 },
+  pressed: { opacity: 0.5 },
+});

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { AppText as Text } from "./typography";
@@ -7,10 +8,12 @@ export function YearSelector({
   year,
   onChange,
   disabled = false,
+  action,
 }: {
   year: number;
   onChange: (year: number) => void;
   disabled?: boolean;
+  action?: ReactNode;
 }) {
   const previousDisabled = disabled || year === 1000;
   const nextDisabled = disabled || year === 9999;
@@ -71,6 +74,7 @@ export function YearSelector({
           </View>
         </Pressable>
       )}
+      {action && <View style={styles.action}>{action}</View>}
     </View>
   );
 }
@@ -103,6 +107,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: "600",
   },
+  action: { marginLeft: "auto", maxWidth: "100%" },
   currentBadge: {
     flexDirection: "row",
     alignItems: "center",

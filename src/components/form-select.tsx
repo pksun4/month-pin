@@ -164,6 +164,7 @@ export function FormSelect<Code extends string | number | null>({
                     color={colors.muted}
                   />
                   <TextInput
+                    containerStyle={s.flex}
                     accessibilityLabel={`${label} 검색`}
                     value={query}
                     onChangeText={setQuery}

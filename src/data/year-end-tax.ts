@@ -1,15 +1,39 @@
+import {
+  loadTaxCards,
+  loadTaxCardSpending,
+  saveTaxCardSpending,
+} from "./year-end-tax-cards";
 import type { SQLiteDatabase } from "expo-sqlite";
-import type { YearEndTaxSettings } from "./models";
+import type {
+  YearEndTaxSettings,
+  YearEndTaxYear,
+  YearEndTaxMonth,
+} from "./models";
+import {
+  TAX_SPENDING_METHODS,
+  MAX_TAX_SPENDING_AMOUNT,
+  type TaxSpendingAmounts,
+} from "./tax-spending-types";
 import {
   isValidGrossSalary,
   MAX_GROSS_SALARY,
   validateTaxYear,
+  validateTaxMonth,
 } from "../utils/year-end-tax";
 
 export const YEAR_END_TAX_SCHEMA = `
   CREATE TABLE IF NOT EXISTS annual_tax_settings (
     year INTEGER PRIMARY KEY NOT NULL CHECK (typeof(year) = 'integer' AND year BETWEEN 1000 AND 9999),
     grossSalary INTEGER NOT NULL CHECK (typeof(grossSalary) = 'integer' AND grossSalary BETWEEN 0 AND ${MAX_GROSS_SALARY})
+  );
+`;
+
+export const YEAR_END_TAX_SPENDING_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS monthly_tax_spending (
+    year INTEGER NOT NULL CHECK (typeof(year) = 'integer' AND year BETWEEN 1000 AND 9999),
+    month INTEGER NOT NULL CHECK (typeof(month) = 'integer' AND month BETWEEN 1 AND 12),
+    ${TAX_SPENDING_METHODS.map(({ code }) => `${code} INTEGER NOT NULL CHECK (typeof(${code}) = 'integer' AND ${code} BETWEEN 0 AND ${MAX_TAX_SPENDING_AMOUNT})`).join(",\n    ")},
+    PRIMARY KEY (year, month)
   );
 `;
 
@@ -39,4 +63,64 @@ export async function saveYearEndTaxSalary(
     year,
     grossSalary,
   );
+}
+
+export async function loadYearEndTaxYear(
+  db: SQLiteDatabase,
+  year: number,
+): Promise<YearEndTaxYear> {
+  const settings = await loadYearEndTaxSettings(db, year);
+  const rows = await db.getAllAsync<TaxSpendingAmounts & { month: number }>(
+    "SELECT month, cash_receipt, debit_card, local_card, credit_card FROM monthly_tax_spending WHERE year = ? ORDER BY month",
+    year,
+  );
+  const cards = await loadTaxCardSpending(db, year);
+  return {
+    ...settings,
+    selectedCards: await loadTaxCards(db, year),
+    months: rows.map(({ month, ...amounts }) => ({
+      year,
+      month,
+      amounts,
+      cards: cards
+        .filter((card) => card.month === month)
+        .map(({ month: _month, ...card }) => card),
+    })),
+  };
+}
+
+export async function saveYearEndTaxMonth(
+  db: SQLiteDatabase,
+  entry: YearEndTaxMonth,
+) {
+  validateTaxMonth(entry.year, entry.month);
+  if (
+    !entry.amounts ||
+    Object.keys(entry.amounts).length !== TAX_SPENDING_METHODS.length ||
+    TAX_SPENDING_METHODS.some(({ code }) => {
+      const amount = entry.amounts[code];
+      return (
+        !Number.isSafeInteger(amount) ||
+        amount < 0 ||
+        amount > MAX_TAX_SPENDING_AMOUNT
+      );
+    })
+  )
+    throw new Error("사용금액을 0원부터 9,999,999,999원까지 입력해 주세요.");
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO monthly_tax_spending (year, month, cash_receipt, debit_card, local_card, credit_card)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(year, month) DO UPDATE SET
+       cash_receipt = excluded.cash_receipt, debit_card = excluded.debit_card,
+       local_card = excluded.local_card, credit_card = excluded.credit_card`,
+      entry.year,
+      entry.month,
+      entry.amounts.cash_receipt,
+      entry.amounts.debit_card,
+      entry.amounts.local_card,
+      entry.amounts.credit_card,
+    );
+    await saveTaxCardSpending(db, entry.year, entry.month, entry.cards);
+  });
 }

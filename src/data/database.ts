@@ -1,3 +1,7 @@
+import {
+  YEAR_END_TAX_CARDS_SCHEMA,
+  migrateOhaCheckSpending,
+} from "./year-end-tax-cards";
 import type { SQLiteDatabase } from "expo-sqlite";
 import type {
   Expense,
@@ -21,7 +25,10 @@ import {
 } from "./method-types";
 import { LEDGER_SCHEMA } from "./ledger";
 import { CARD_BENEFIT_SCHEMA } from "./card-benefits";
-import { YEAR_END_TAX_SCHEMA } from "./year-end-tax";
+import {
+  YEAR_END_TAX_SCHEMA,
+  YEAR_END_TAX_SPENDING_SCHEMA,
+} from "./year-end-tax";
 import {
   CARD_BENEFIT_HISTORY_SCHEMA,
   seedCardBenefitHistory,
@@ -119,7 +126,9 @@ export const SCHEMA = `
   ${CARD_BENEFIT_SCHEMA}
   ${CARD_BENEFIT_HISTORY_SCHEMA}
   ${YEAR_END_TAX_SCHEMA}
-  PRAGMA user_version = 16;
+  ${YEAR_END_TAX_SPENDING_SCHEMA}
+  ${YEAR_END_TAX_CARDS_SCHEMA}
+  PRAGMA user_version = 18;
 `;
 
 async function migrateExpenseTypes(db: SQLiteDatabase) {
@@ -245,7 +254,7 @@ export async function initializeDatabase(db: SQLiteDatabase) {
   const version = await db.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
-  if ((version?.user_version ?? 0) > 16)
+  if ((version?.user_version ?? 0) > 18)
     throw new Error("앱 업데이트가 필요해요.");
   if (!version?.user_version) {
     await db.withTransactionAsync(async () => {
@@ -428,6 +437,19 @@ export async function initializeDatabase(db: SQLiteDatabase) {
       await db.withTransactionAsync(async () => {
         await db.execAsync(YEAR_END_TAX_SCHEMA);
         await db.execAsync("PRAGMA user_version = 16;");
+      });
+    }
+    if (version.user_version <= 16) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(YEAR_END_TAX_SPENDING_SCHEMA);
+        await db.execAsync("PRAGMA user_version = 17;");
+      });
+    }
+    if (version.user_version <= 17) {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync(YEAR_END_TAX_CARDS_SCHEMA);
+        await migrateOhaCheckSpending(db);
+        await db.execAsync("PRAGMA user_version = 18;");
       });
     }
     await db.withTransactionAsync(() => syncProviders(db));

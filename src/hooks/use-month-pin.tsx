@@ -13,6 +13,7 @@ import * as ledgerRepository from "../data/ledger";
 import * as cardBenefitRepository from "../data/card-benefits";
 import * as annualRepository from "../data/annual-summary";
 import * as taxRepository from "../data/year-end-tax";
+import * as taxCardRepository from "../data/year-end-tax-cards";
 import type {
   Expense,
   ExpenseInput,
@@ -23,7 +24,8 @@ import type {
   CardBenefitMonth,
   CardBenefitInput,
   AnnualSummary,
-  YearEndTaxSettings,
+  YearEndTaxYear,
+  YearEndTaxMonth,
 } from "../data/models";
 
 interface Store {
@@ -55,8 +57,13 @@ interface Store {
   saveLedgerAmount: (id: number, amount: number | null) => Promise<void>;
   loadCardBenefitMonth: (month: string) => Promise<CardBenefitMonth>;
   loadAnnualSummary: (year: number) => Promise<AnnualSummary>;
-  loadYearEndTaxSettings: (year: number) => Promise<YearEndTaxSettings>;
+  loadYearEndTaxYear: (year: number) => Promise<YearEndTaxYear>;
   saveYearEndTaxSalary: (year: number, grossSalary: number) => Promise<void>;
+  saveYearEndTaxMonth: (entry: YearEndTaxMonth) => Promise<void>;
+  saveYearEndTaxCards: (
+    year: number,
+    methodIds: readonly number[],
+  ) => Promise<void>;
   saveCardBenefitMonth: (
     month: string,
     inputs: readonly CardBenefitInput[],
@@ -126,9 +133,9 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
     [db, runDatabase],
   );
 
-  const loadYearEndTaxSettings = useCallback(
+  const loadYearEndTaxYear = useCallback(
     (year: number) =>
-      runDatabase(() => taxRepository.loadYearEndTaxSettings(db, year)),
+      runDatabase(() => taxRepository.loadYearEndTaxYear(db, year)),
     [db, runDatabase],
   );
 
@@ -188,7 +195,13 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
         loadLedgerMonth,
         loadCardBenefitMonth,
         loadAnnualSummary,
-        loadYearEndTaxSettings,
+        loadYearEndTaxYear,
+        saveYearEndTaxCards: (year, methodIds) =>
+          mutate(() =>
+            taxCardRepository.saveYearEndTaxCards(db, year, methodIds),
+          ),
+        saveYearEndTaxMonth: (entry) =>
+          mutate(() => taxRepository.saveYearEndTaxMonth(db, entry)),
         saveYearEndTaxSalary: (year, grossSalary) =>
           mutate(() =>
             taxRepository.saveYearEndTaxSalary(db, year, grossSalary),

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 import { AppText as Text } from "./typography";
 import { Button, colors, Empty, s } from "./ui";
@@ -5,15 +6,23 @@ import type { AnnualMonthSummary, AnnualSummary } from "../data/models";
 import { useAnnualSummary } from "../hooks/use-annual-summary";
 import { annualTotals } from "../utils/annual-summary";
 import { money } from "../utils/expenses";
+import { YearSelector } from "./year-selector";
+import { useMonthPin } from "../hooks/use-month-pin";
 
 export function AnnualSummaryView({
   year,
+  onYearChange,
   active,
 }: {
   year: number;
+  onYearChange: (year: number) => void;
   active: boolean;
 }) {
   const { snapshot, loading, error, retry } = useAnnualSummary(year, active);
+  const { busy } = useMonthPin();
+  const yearSelector = (
+    <YearSelector year={year} onChange={onYearChange} disabled={busy} />
+  );
   return (
     <ScrollView
       style={s.flex}
@@ -33,55 +42,45 @@ export function AnnualSummaryView({
           <Button label="다시 시도" secondary onPress={retry} />
         </View>
       ) : snapshot ? (
-        <AnnualSummaryContent snapshot={snapshot} />
+        <AnnualSummaryContent snapshot={snapshot} yearSelector={yearSelector} />
       ) : null}
+      {(loading || error || !snapshot) && yearSelector}
     </ScrollView>
   );
 }
 
-function AnnualSummaryContent({ snapshot }: { snapshot: AnnualSummary }) {
+function AnnualSummaryContent({
+  snapshot,
+  yearSelector,
+}: {
+  snapshot: AnnualSummary;
+  yearSelector: ReactNode;
+}) {
   const total = annualTotals(snapshot);
   if (total.expenseCount === 0 && total.benefitCount === 0)
     return (
-      <Empty
-        icon="bar-chart-outline"
-        title={`${snapshot.year}년 내역이 없어요`}
-        description="고정비와 카드 혜택을 등록하면 한 해의 흐름을 모아볼 수 있어요."
-      />
+      <>
+        {yearSelector}
+        <Empty
+          icon="bar-chart-outline"
+          title={`${snapshot.year}년 내역이 없어요`}
+          description="고정비와 카드 혜택을 등록하면 한 해의 흐름을 모아볼 수 있어요."
+        />
+      </>
     );
   return (
     <>
       <View style={styles.summary}>
         <SummaryRow label="연간 지출 합계" amount={total.expenseTotal} />
-        <SummaryRow label="카드 혜택" amount={total.benefitTotal} />
+        <SummaryRow label="카드 혜택" amount={total.benefitTotal} deduction />
         <SummaryRow
           label="혜택 반영 예상액"
           amount={total.estimatedTotal}
           emphasized
         />
       </View>
-      <View style={styles.notes}>
-        <Text style={s.caption}>
-          1~12월 캘린더 기준 · 예정된 고정 지출도 포함해요.
-        </Text>
-        <Text style={s.caption}>
-          카드 혜택은 확정한 금액과 미확정 예상 금액을 더해요.
-        </Text>
-        {total.pendingExpenses > 0 && (
-          <Text style={styles.expensePending}>
-            변동비 미입력 {total.pendingExpenses}건 · 지출 합계에서 제외
-          </Text>
-        )}
-        {total.pendingBenefitMonths > 0 && (
-          <Text style={styles.benefitPending}>
-            혜택 미확정 {total.pendingBenefitMonths}개월 · 예상 금액 반영
-          </Text>
-        )}
-      </View>
       <View style={styles.monthSection}>
-        <Text style={s.sectionTitle} accessibilityRole="header">
-          월별 요약
-        </Text>
+        {yearSelector}
         <View style={styles.months}>
           <View style={styles.tableHeader}>
             <Text style={[styles.columnLabel, styles.monthColumn]}>월</Text>
@@ -97,6 +96,20 @@ function AnnualSummaryContent({ snapshot }: { snapshot: AnnualSummary }) {
           ))}
         </View>
       </View>
+      {(total.pendingExpenses > 0 || total.pendingBenefitMonths > 0) && (
+        <View style={styles.notes}>
+          {total.pendingExpenses > 0 && (
+            <Text style={styles.expensePending}>
+              금액 미입력 {total.pendingExpenses}건 · 합계 제외
+            </Text>
+          )}
+          {total.pendingBenefitMonths > 0 && (
+            <Text style={styles.benefitPending}>
+              혜택 미확정 {total.pendingBenefitMonths}개월 · 예상액 포함
+            </Text>
+          )}
+        </View>
+      )}
     </>
   );
 }
@@ -105,10 +118,12 @@ function SummaryRow({
   label,
   amount,
   emphasized = false,
+  deduction = false,
 }: {
   label: string;
   amount: number;
   emphasized?: boolean;
+  deduction?: boolean;
 }) {
   return (
     <View style={[styles.summaryRow, emphasized && styles.estimateRow]}>
@@ -119,7 +134,11 @@ function SummaryRow({
         numberOfLines={1}
         adjustsFontSizeToFit
         style={[styles.summaryValue, emphasized && styles.estimateValue]}
+        accessibilityLabel={
+          deduction ? `${label} ${money(amount)} 차감` : undefined
+        }
       >
+        {deduction && amount > 0 ? "−" : ""}
         {money(amount)}
       </Text>
     </View>
@@ -131,7 +150,7 @@ function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
   return (
     <View
       accessible
-      accessibilityLabel={`${label}, 지출 합계 ${money(month.expenseTotal)}, 변동비 미입력 ${month.pendingExpenses}건, 카드 혜택 ${money(month.benefitTotal)}, 혜택 미확정 ${month.pendingBenefits}개`}
+      accessibilityLabel={`${label}, 지출 합계 ${money(month.expenseTotal)}, 변동비 미입력 ${month.pendingExpenses}건, 카드 혜택 ${money(month.benefitTotal)} 차감, 혜택 미확정 ${month.pendingBenefits}개`}
       style={styles.monthRow}
     >
       <Text style={[styles.monthName, styles.monthColumn]}>{label}</Text>
@@ -147,7 +166,9 @@ function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
       </View>
       <View style={styles.amountColumn}>
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.amount}>
-          {month.benefitCount ? money(month.benefitTotal) : "—"}
+          {month.benefitCount
+            ? `${month.benefitTotal > 0 ? "−" : ""}${money(month.benefitTotal)}`
+            : "—"}
         </Text>
         {month.pendingBenefits > 0 && (
           <Text style={styles.benefitPending}>예상 포함</Text>
@@ -158,7 +179,7 @@ function AnnualMonthRow({ month }: { month: AnnualMonthSummary }) {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 12, gap: 16 },
+  page: { paddingTop: 20, gap: 16 },
   loading: { alignItems: "center", paddingVertical: 48, gap: 12 },
   summary: {
     backgroundColor: colors.white,

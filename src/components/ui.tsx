@@ -22,27 +22,15 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../hooks/use-month-pin";
+import { colors } from "./theme";
 
-export const colors = {
-  bg: "#F6F7FB",
-  white: "#FFFFFF",
-  ink: "#202438",
-  muted: "#717789",
-  blue: "#536DFE",
-  softBlue: "#EBEEFF",
-  orange: "#E67824",
-  green: "#16835D",
-  softOrange: "#FFF0E1",
-  orangeInk: "#A54C13",
-  line: "#E7EAF2",
-  red: "#BE3445",
-  softRed: "#FFF1F0",
-};
+export { colors } from "./theme";
 
 const FormNavigationContext = createContext<
   ((field: View | null, focus?: () => void) => void) | null
@@ -315,6 +303,9 @@ export function FormModal({
 
 export function Field({
   label,
+  labelLeading,
+  inlineLabel = false,
+  unit,
   value,
   onChangeText,
   placeholder,
@@ -328,6 +319,9 @@ export function Field({
   disabled = false,
 }: {
   label: string;
+  labelLeading?: ReactNode;
+  inlineLabel?: boolean;
+  unit?: string;
   value: string;
   onChangeText: (text: string) => void;
   placeholder: string;
@@ -341,35 +335,70 @@ export function Field({
   disabled?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
+  const { fontScale } = useWindowDimensions();
+  const inputLabel = `${label}${unit ? ` (${unit})` : ""}${required ? ", 필수" : ""}`;
   return (
     <View style={s.field}>
-      <FieldLabel label={label} required={required} />
-      <TextInput
-        ref={controlRef}
-        accessibilityLabel={required ? `${label}, 필수` : label}
-        accessibilityHint={error || hint}
-        accessibilityState={{ disabled }}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.muted}
-        style={[
-          s.input,
-          focused && { borderColor: colors.blue },
-          !!error && s.invalidInput,
-          disabled && { opacity: 0.6 },
-        ]}
-        editable={!disabled}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          onBlur?.();
-        }}
-        keyboardType={numeric ? "number-pad" : "default"}
-        maxLength={maxLength}
-        autoCorrect={false}
-        returnKeyType="done"
-      />
+      <View style={inlineLabel ? s.inlineField : s.field}>
+        <View
+          style={
+            inlineLabel
+              ? [s.inlineFieldLabel, { flexBasis: 96 * fontScale }]
+              : undefined
+          }
+        >
+          {labelLeading ? (
+            <View style={[s.row, inlineLabel && s.inlineFieldLabelRow]}>
+              {labelLeading}
+              <View style={s.flex}>
+                <FieldLabel label={label} required={required} />
+              </View>
+            </View>
+          ) : (
+            <FieldLabel label={label} required={required} />
+          )}
+        </View>
+        <View
+          style={[
+            s.fieldControl,
+            inlineLabel && [
+              s.inlineFieldControl,
+              { flexBasis: 180 * fontScale },
+            ],
+          ]}
+        >
+          <TextInput
+            ref={controlRef}
+            containerStyle={s.flex}
+            accessibilityLabel={inputLabel}
+            accessibilityHint={error || hint}
+            accessibilityState={{ disabled }}
+            value={value}
+            onChangeText={onChangeText}
+            placeholder={placeholder}
+            placeholderTextColor={colors.muted}
+            style={[
+              s.input,
+              inlineLabel && s.inlineFieldInput,
+              inlineLabel && numeric && s.inlineAmountInput,
+              focused && { borderColor: colors.blue },
+              !!error && s.invalidInput,
+              disabled && { opacity: 0.6 },
+            ]}
+            editable={!disabled}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              onBlur?.();
+            }}
+            keyboardType={numeric ? "number-pad" : "default"}
+            maxLength={maxLength}
+            autoCorrect={false}
+            returnKeyType="done"
+          />
+          {unit && <Text style={s.fieldLabel}>{unit}</Text>}
+        </View>
+      </View>
       <FieldMessage error={error} hint={hint} />
     </View>
   );
@@ -502,6 +531,29 @@ export const s = StyleSheet.create({
     justifyContent: "center",
   },
   field: { gap: 8 },
+  inlineField: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: 12,
+    rowGap: 8,
+  },
+  inlineFieldLabel: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  inlineFieldLabelRow: { gap: 6 },
+  fieldControl: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+  },
+  inlineFieldControl: { flexGrow: 1, flexShrink: 1 },
+  inlineFieldInput: {
+    minHeight: 48,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  inlineAmountInput: { textAlign: "right", fontVariant: ["tabular-nums"] },
   fieldLabel: { fontSize: 14, color: colors.ink, fontWeight: "600" },
   input: {
     borderRadius: 13,

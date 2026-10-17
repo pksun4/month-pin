@@ -49,7 +49,8 @@ export function ChargeDayField({
           <View
             style={[
               s.compactInput,
-              { width: 88 * fontScale },
+              styles.inputContainer,
+              { width: 132 * fontScale },
               focused && styles.focused,
               !!message && s.invalidInput,
               disabled && styles.dimmed,
@@ -57,6 +58,7 @@ export function ChargeDayField({
           >
             <TextInput
               ref={controlRef}
+              containerStyle={styles.inputSlot}
               accessibilityLabel={`매월 ${label}`}
               accessibilityHint={message || "1일부터 31일까지 입력해 주세요."}
               accessibilityState={{ disabled }}
@@ -64,7 +66,7 @@ export function ChargeDayField({
               onChangeText={(text) => onChange(text.replace(/\D/g, ""))}
               placeholder="25"
               placeholderTextColor={colors.muted}
-              style={[styles.input, { height: 26 * fontScale }]}
+              style={[styles.input, { height: 44 * fontScale }]}
               keyboardType="number-pad"
               maxLength={2}
               editable={!disabled}
@@ -102,6 +104,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   label: { lineHeight: 22, includeFontPadding: false },
+  inputContainer: { paddingVertical: 0 },
+  inputSlot: { flex: 1, minWidth: 0 },
   input: {
     flex: 1,
     minWidth: 0,

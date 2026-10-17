@@ -1,4 +1,5 @@
 import type { ProviderCode } from "./providers";
+import type { TaxSpendingAmounts } from "./tax-spending-types";
 import type {
   CardBenefitTypeCode,
   CardTypeCode,
@@ -109,4 +110,29 @@ export interface AnnualSummary {
 export interface YearEndTaxSettings {
   year: number;
   grossSalary: number | null;
+}
+
+export interface YearEndTaxMonth {
+  year: number;
+  month: number;
+  amounts: TaxSpendingAmounts;
+  cards?: TaxCardSpending[];
+}
+
+export interface YearEndTaxCard {
+  methodId: number;
+  name: string;
+  providerName: string;
+  cardTypeCode: "credit" | "debit";
+}
+
+export interface TaxCardSpending extends Omit<YearEndTaxCard, "methodId"> {
+  id: number | null;
+  methodId: number | null;
+  amount: number;
+}
+
+export interface YearEndTaxYear extends YearEndTaxSettings {
+  months: YearEndTaxMonth[];
+  selectedCards: YearEndTaxCard[];
 }

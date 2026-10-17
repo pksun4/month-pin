@@ -15,8 +15,8 @@ export const METHOD_SORT_OPTIONS = [
 export type MethodSortCode = (typeof METHOD_SORT_OPTIONS)[number]["code"];
 
 export const CARD_TYPES = [
-  { code: "credit", label: "신용카드" },
   { code: "debit", label: "체크카드" },
+  { code: "credit", label: "신용카드" },
 ] as const;
 
 export type CardTypeCode = (typeof CARD_TYPES)[number]["code"];

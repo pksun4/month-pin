@@ -100,12 +100,14 @@ export function CompactActionButton({
   accessibilityLabel,
   onPress,
   disabled = false,
+  size = "regular",
 }: {
   label: string;
   icon: IconName;
   accessibilityLabel: string;
   onPress: () => void;
   disabled?: boolean;
+  size?: "regular" | "small";
 }) {
   return (
     <Pressable
@@ -119,14 +121,20 @@ export function CompactActionButton({
         (pressed || disabled) && styles.dimmed,
       ]}
     >
-      <View style={styles.registerButton}>
+      <View
+        style={[styles.registerButton, size === "small" && styles.smallButton]}
+      >
         <Ionicons
           name={icon}
-          size={14}
+          size={size === "small" ? 12 : 14}
           color={colors.blue}
           accessible={false}
         />
-        <Text style={styles.registerLabel}>{label}</Text>
+        <Text
+          style={[styles.registerLabel, size === "small" && styles.smallLabel]}
+        >
+          {label}
+        </Text>
       </View>
     </Pressable>
   );
@@ -260,6 +268,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.blue,
   },
+  smallButton: { minHeight: 28, paddingHorizontal: 8 },
+  smallLabel: { fontSize: 12, lineHeight: 18 },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",

@@ -3,7 +3,7 @@ import { View, type TextInput } from "react-native";
 import { AppText as Text } from "./typography";
 import type { CardBenefitEntry, CardBenefitMonth } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
-import { formatAmountInput, money } from "../utils/expenses";
+import { formatAmountInput, money, sortCardsByType } from "../utils/expenses";
 import { formatMonth, parseLedgerAmount } from "../utils/ledger";
 import { Button, Field, FieldMessage, s, useFormNavigation } from "./ui";
 
@@ -16,10 +16,16 @@ export function CardBenefitForm({
   snapshot: CardBenefitMonth;
   onClose: () => void;
 }) {
-  const { saveCardBenefitMonth, busy } = useMonthPin();
-  const variable = snapshot.cards.filter(
-    (card) => card.benefitTypeCode === "variable",
-  );
+  const { saveCardBenefitMonth, busy, methods } = useMonthPin();
+  const variable = sortCardsByType(
+    snapshot.cards
+      .filter((card) => card.benefitTypeCode === "variable")
+      .map((card) => ({
+        card,
+        cardTypeCode: methods.find((method) => method.id === card.methodId)
+          ?.cardTypeCode,
+      })),
+  ).map(({ card }) => card);
   const fixedTotal = snapshot.cards
     .filter((card) => card.benefitTypeCode === "fixed")
     .reduce((sum, card) => sum + card.expectedAmount, 0);

@@ -22,6 +22,7 @@ import {
   sortPaymentMethods,
   groupCardMethods,
   mergePaymentMethodOrder,
+  sortCardsByType,
 } from "../../utils/expenses";
 import { ExpenseRow } from "../../components/expense-row";
 import { MethodForm } from "../../components/method-form";
@@ -92,8 +93,10 @@ export default function WalletScreen() {
   const related = selected ? relatedExpenses(selected, methods, expenses) : [];
   const linkedCards =
     selected?.kind === "bank"
-      ? methods.filter(
-          (method) => method.kind === "card" && method.bankId === selected.id,
+      ? sortCardsByType(
+          methods.filter(
+            (method) => method.kind === "card" && method.bankId === selected.id,
+          ),
         )
       : [];
 

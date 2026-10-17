@@ -32,6 +32,11 @@ const GENERAL_RATES = [
   { code: "credit", label: "신용카드", percent: 15 },
 ] as const;
 
+const GENERAL_LIMITS = [
+  { label: "총급여 7천만 원 이하", amount: "300만 원" },
+  { label: "총급여 7천만 원 초과", amount: "250만 원" },
+] as const;
+
 export function YearEndTaxGuide() {
   return (
     <View style={styles.content}>
@@ -72,7 +77,7 @@ export function YearEndTaxGuide() {
       <View style={styles.section}>
         <Text style={styles.title}>2. 결제수단별 소득공제율</Text>
         <Text style={styles.body}>
-          세 수단의 공제 대상 사용액 합계가{" "}
+          공제 대상 사용액 합계가{" "}
           <Text style={styles.strong}>총급여의 25%</Text>를 넘으면, 초과분부터
           계산해요.
         </Text>
@@ -89,13 +94,34 @@ export function YearEndTaxGuide() {
             </View>
           ))}
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.title}>3. 공제 한도</Text>
+        <View style={styles.bands}>
+          {GENERAL_LIMITS.map((limit) => (
+            <View
+              key={limit.label}
+              style={styles.bandColumn}
+              accessible
+              accessibilityLabel={`${limit.label} 기본 소득공제 한도 ${limit.amount}`}
+            >
+              <Text style={styles.bandLabel}>{limit.label}</Text>
+              <Text style={styles.rateValue}>{limit.amount}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={styles.body}>
+          한도를 채우면 일반 사용분을 더 써도 공제가 늘지 않아요.
+        </Text>
         <Text style={styles.caption}>
-          일반 사용분 기준 · 전통시장·대중교통 등은 별도예요.
+          자녀 수에 따라 기본 한도가 늘고, 전통시장·대중교통 등은 추가 공제가
+          있어요.
         </Text>
       </View>
 
       <View style={styles.example}>
-        <Text style={styles.title}>3. 현금영수증으로 100만 원을 더 쓰면?</Text>
+        <Text style={styles.title}>4. 현금영수증으로 100만 원을 더 쓰면?</Text>
         <Text style={styles.body}>
           100만 원 × 30% = 세금 매길 소득에서 30만 원 제외
         </Text>
