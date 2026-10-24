@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <title>%WEB_TITLE%</title>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="몬스핀" />
@@ -13,6 +13,12 @@
       html,
       body {
         height: 100%;
+      }
+      /* Follow Safari's visible height as browser controls expand or collapse. */
+      @supports (height: 100dvh) {
+        html {
+          height: 100dvh;
+        }
       }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {

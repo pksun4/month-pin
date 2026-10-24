@@ -1,4 +1,6 @@
 import { Tabs } from "expo-router";
+import { Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, type IconName } from "../../components/ui";
 import { bodyFontStyle } from "../../components/typography";
@@ -37,6 +39,8 @@ const tabs: {
 ];
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const webBottomPadding = Math.max(insets.bottom, 8);
   return (
     <Tabs
       screenOptions={{
@@ -47,10 +51,19 @@ export default function TabLayout() {
           backgroundColor: colors.white,
           borderTopColor: colors.line,
           paddingTop: 8,
+          ...Platform.select({
+            web: {
+              // Keep icon + label space independent of the home indicator inset.
+              height: 60 + webBottomPadding,
+              paddingTop: 4,
+              paddingBottom: webBottomPadding,
+            },
+          }),
         },
         tabBarLabelStyle: [
           { fontSize: 11, fontWeight: "600" },
           bodyFontStyle("600"),
+          Platform.OS === "web" && { lineHeight: 14 },
         ],
         tabBarHideOnKeyboard: true,
       }}
