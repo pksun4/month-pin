@@ -129,6 +129,8 @@ npx expo start --go --clear
 
 `npm run build:web`으로 `dist/`를 생성합니다. `web.output`은 클라이언트 렌더링을 사용하는 `single`입니다. SQLite 웹 실행에 필요한 WASM 확장자는 `metro.config.js`, 배포 응답의 COOP/COEP 헤더는 `public/_headers`에서 설정합니다. Metro를 재시작하면 로컬 웹에도 같은 헤더를 적용합니다.
 
+Cloudflare Pages는 `node_modules` 폴더를 정적 에셋에서도 제외합니다. 빌드 마지막의 `scripts/prepare-pages.cjs`가 Expo의 의존성 에셋을 `dist/assets/vendor/`로 옮기고, `public/_redirects`의 내부 재작성 규칙으로 기존 번들 URL을 연결합니다. SQLite WASM과 아이콘 폰트를 함께 보존하며, WASM 파일이 없거나 경로 규칙이 빠지면 빌드를 실패시킵니다. 앱 DB나 네이티브 앱의 에셋 경로는 변경하지 않습니다.
+
 Cloudflare Pages에서 Git 저장소를 연결할 경우 빌드 명령은 `npm run build:web`, 출력 폴더는 `dist`입니다. Git 연결 없이 배포할 때는 Cloudflare 공식 Wrangler의 `pages deploy dist`를 사용합니다. 두 프로젝트 방식은 생성 전에 선택해야 합니다. 브라우저 저장소가 주소별로 나뉘므로 실제 데이터는 매번 바뀌는 미리보기 주소 대신 고정된 운영 주소에서 불러옵니다.
 
 배포 후 HTTPS, COOP/COEP, SQLite 로딩·저장·새로고침 후 유지와 백업 복원을 확인합니다. 웹 SQLite는 Expo에서 알파 지원으로 안내하고 있으므로 실제 휴대폰 브라우저에서도 확인합니다. 웹 배포는 기기 간 동기화나 서버 DB 연결을 추가하지 않습니다.
