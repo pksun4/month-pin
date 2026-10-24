@@ -420,6 +420,140 @@ test("backup round-trip preserves every table, deleted history, confirmations, r
   }
 });
 
+const RETIRED_CARD_USAGE_SCHEMA = `CREATE TABLE monthly_card_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, month TEXT NOT NULL,
+  methodId INTEGER NOT NULL, methodName TEXT NOT NULL, providerName TEXT NOT NULL,
+  providerCode TEXT, cardTypeCode TEXT, amount INTEGER NOT NULL,
+  UNIQUE(month, methodId));`;
+
+test("backup preserves retired card usage rows and deleted ID sequences across restore and reopening", async () => {
+  const source = sqliteAdapter();
+  const directory = mkdtempSync(join(tmpdir(), "monthpin-legacy-backup-"));
+  const path = join(directory, "restored.db");
+  let target = sqliteAdapter(path);
+  try {
+    await backupFixture(source);
+    await source.execAsync(RETIRED_CARD_USAGE_SCHEMA);
+    await source.runAsync(
+      "INSERT INTO monthly_card_usage VALUES (12,'2025-12',99,'삭제한 카드','국민','card_kb','credit',450000)",
+    );
+    await source.execAsync(
+      "UPDATE sqlite_sequence SET seq = 700 WHERE name = 'monthly_card_usage'",
+    );
+    const backup = await backupRepository.createBackup(source);
+    assert.equal(backup.tables.monthly_card_usage[0].amount, 450000);
+    await repository.initializeDatabase(target);
+    await backupRepository.restoreBackup(
+      target,
+      backupRepository.parseBackup(JSON.stringify(backup)),
+    );
+    target.sqlite.close();
+    target = sqliteAdapter(path);
+    await repository.initializeDatabase(target);
+    const restored = await backupRepository.createBackup(target);
+    assert.deepEqual(restored.tables, backup.tables);
+    assert.deepEqual(restored.sequences, backup.sequences);
+    assert.deepEqual(
+      (await backupRepository.createBackup(source)).tables,
+      backup.tables,
+    );
+    assert.equal(
+      (await target.getFirstAsync("PRAGMA user_version")).user_version,
+      20,
+    );
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy backup restoration rolls back archival table creation and active records together, then retries", async () => {
+  const source = sqliteAdapter();
+  const target = sqliteAdapter();
+  try {
+    await backupFixture(source);
+    await source.execAsync(RETIRED_CARD_USAGE_SCHEMA);
+    await source.execAsync(
+      "INSERT INTO monthly_card_usage VALUES (1,'2026-01',99,'과거 카드','국민',NULL,NULL,0)",
+    );
+    const backup = await backupRepository.createBackup(source);
+    await repository.initializeDatabase(target);
+    const before = await backupRepository.createBackup(target);
+    const read = target.getFirstAsync;
+    target.getFirstAsync = async (sql, ...params) => {
+      if (sql === "PRAGMA quick_check") return { quick_check: "failure" };
+      return read(sql, ...params);
+    };
+    await assert.rejects(
+      backupRepository.restoreBackup(target, backup),
+      /백업 파일/,
+    );
+    target.getFirstAsync = read;
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).tables,
+      before.tables,
+    );
+    assert.equal(
+      await target.getFirstAsync(
+        "SELECT name FROM sqlite_master WHERE name = 'monthly_card_usage'",
+      ),
+      undefined,
+    );
+    const invalid = JSON.parse(JSON.stringify(backup));
+    invalid.tables.monthly_card_usage[0].unexpected = 1;
+    await assert.rejects(
+      backupRepository.restoreBackup(target, invalid),
+      /백업 파일/,
+    );
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).sequences,
+      before.sequences,
+    );
+    await backupRepository.restoreBackup(target, backup);
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).tables,
+      backup.tables,
+    );
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+  }
+});
+
+test("legacy records also prevent importing into a used app; empty legacy tables accept existing backup format", async () => {
+  const source = sqliteAdapter();
+  const target = sqliteAdapter();
+  try {
+    await backupFixture(source);
+    const backup = await backupRepository.createBackup(source);
+    assert.equal(Object.hasOwn(backup.tables, "monthly_card_usage"), false);
+    await repository.initializeDatabase(target);
+    await target.execAsync(RETIRED_CARD_USAGE_SCHEMA);
+    await target.execAsync(
+      "INSERT INTO monthly_card_usage VALUES (1,'2026-01',99,'과거 카드','국민',NULL,NULL,0)",
+    );
+    const before = await backupRepository.createBackup(target);
+    await assert.rejects(
+      backupRepository.restoreBackup(target, backup),
+      /기존 기록/,
+    );
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).tables,
+      before.tables,
+    );
+    await target.execAsync("DELETE FROM monthly_card_usage");
+    await backupRepository.restoreBackup(target, backup);
+    const restored = await backupRepository.createBackup(target);
+    assert.deepEqual(restored.tables.monthly_card_usage, []);
+    for (const name of backupRepository.BACKUP_TABLES)
+      assert.deepEqual(restored.tables[name], backup.tables[name]);
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+  }
+});
+
 test("backup import rejects existing data without changing any record or sequence", async () => {
   const source = sqliteAdapter();
   const target = sqliteAdapter();

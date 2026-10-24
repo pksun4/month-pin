@@ -16,14 +16,20 @@ export const BACKUP_TABLES = [
   "interest_income_entries",
 ] as const;
 
-type TableName = (typeof BACKUP_TABLES)[number];
+// Older installs retain this retired feature's data; never silently discard it.
+const OPTIONAL_BACKUP_TABLES = ["monthly_card_usage"] as const;
+const ALLOWED_TABLES = [...BACKUP_TABLES, ...OPTIONAL_BACKUP_TABLES] as const;
+type RequiredTableName = (typeof BACKUP_TABLES)[number];
+type OptionalTableName = (typeof OPTIONAL_BACKUP_TABLES)[number];
+type TableName = (typeof ALLOWED_TABLES)[number];
 type Row = Record<string, string | number | null>;
 export interface Backup {
   format: "monthpin_backup";
   formatVersion: 1;
   schemaVersion: number;
   createdAt: string;
-  tables: Record<TableName, Row[]>;
+  tables: Record<RequiredTableName, Row[]> &
+    Partial<Record<OptionalTableName, Row[]>>;
   sequences: { name: string; seq: number }[];
 }
 
@@ -34,6 +40,20 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const sameKeys = (value: object, keys: readonly string[]) =>
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key));
+
+const LEGACY_CARD_USAGE_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS monthly_card_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month TEXT NOT NULL,
+    methodId INTEGER NOT NULL,
+    methodName TEXT NOT NULL,
+    providerName TEXT NOT NULL,
+    providerCode TEXT,
+    cardTypeCode TEXT,
+    amount INTEGER NOT NULL,
+    UNIQUE(month, methodId)
+  );
+`;
 
 export function parseBackup(text: string): Backup {
   if (text.length > MAX_BACKUP_BYTES) throw invalid();
@@ -51,12 +71,19 @@ export function parseBackup(text: string): Backup {
     typeof value.createdAt !== "string" ||
     !Number.isFinite(Date.parse(value.createdAt)) ||
     !isRecord(value.tables) ||
-    !sameKeys(value.tables, BACKUP_TABLES) ||
     !Array.isArray(value.sequences)
   )
     throw invalid();
-  for (const name of BACKUP_TABLES) {
-    const rows = value.tables[name];
+  const tables = value.tables;
+  if (
+    !BACKUP_TABLES.every((name) => Object.hasOwn(tables, name)) ||
+    Object.keys(tables).some(
+      (name) => !ALLOWED_TABLES.includes(name as TableName),
+    )
+  )
+    throw invalid();
+  for (const name of Object.keys(tables) as TableName[]) {
+    const rows = tables[name];
     if (
       !Array.isArray(rows) ||
       rows.some(
@@ -78,7 +105,8 @@ export function parseBackup(text: string): Backup {
       !isRecord(sequence) ||
       !sameKeys(sequence, ["name", "seq"]) ||
       typeof sequence.name !== "string" ||
-      !BACKUP_TABLES.includes(sequence.name as TableName) ||
+      !ALLOWED_TABLES.includes(sequence.name as TableName) ||
+      !Object.hasOwn(value.tables, sequence.name) ||
       sequenceNames.has(sequence.name) ||
       !Number.isSafeInteger(sequence.seq) ||
       (sequence.seq as number) < 0
@@ -100,19 +128,30 @@ async function checkTables(db: SQLiteDatabase) {
   const tables = await db.getAllAsync<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   );
-  if (
-    tables.length !== BACKUP_TABLES.length ||
-    tables.some(({ name }) => !BACKUP_TABLES.includes(name as TableName))
-  )
-    throw new Error("백업 기능 업데이트가 필요해요.");
+  const missing = BACKUP_TABLES.filter(
+    (name) => !tables.some((table) => table.name === name),
+  );
+  const unknown = tables.filter(
+    ({ name }) => !ALLOWED_TABLES.includes(name as TableName),
+  );
+  if (missing.length || unknown.length)
+    throw new Error(
+      `백업 기능 업데이트가 필요해요. 저장 구조를 확인해 주세요. (${[
+        ...missing.map((name) => `누락: ${name}`),
+        ...unknown.map(({ name }) => `미지원: ${name}`),
+      ].join(", ")})`,
+    );
+  return ALLOWED_TABLES.filter((name) =>
+    tables.some((table) => table.name === name),
+  );
 }
 
 export async function createBackup(db: SQLiteDatabase): Promise<Backup> {
   let backup!: Backup;
   await db.withTransactionAsync(async () => {
-    await checkTables(db);
+    const names = await checkTables(db);
     const tables = {} as Backup["tables"];
-    for (const name of BACKUP_TABLES)
+    for (const name of names)
       tables[name] = await db.getAllAsync<Row>(`SELECT * FROM ${name}`);
     backup = {
       format: "monthpin_backup",
@@ -135,13 +174,17 @@ export async function restoreBackup(db: SQLiteDatabase, input: Backup) {
   if (backup.schemaVersion !== (await schemaVersion(db)))
     throw new Error("백업한 앱과 같은 버전으로 업데이트한 뒤 불러와 주세요.");
   await db.withTransactionAsync(async () => {
-    await checkTables(db);
-    for (const name of BACKUP_TABLES.slice(1)) {
+    const existingNames = await checkTables(db);
+    for (const name of existingNames.slice(1)) {
       if (await db.getFirstAsync(`SELECT 1 FROM ${name} LIMIT 1`))
         throw new Error(
           "기존 기록을 보호하기 위해 데이터가 없는 앱에서만 불러올 수 있어요.",
         );
     }
+    // Only restore the known archival table when the source actually had it.
+    // The DDL is application-owned; no SQL from the backup is executed.
+    if (Object.hasOwn(backup.tables, "monthly_card_usage"))
+      await db.execAsync(LEGACY_CARD_USAGE_SCHEMA);
     // Defer the self-reference from cards to bank accounts until all rows exist.
     await db.execAsync("PRAGMA defer_foreign_keys = ON;");
     const autoTables = await db.getAllAsync<{ name: string }>(
@@ -156,7 +199,9 @@ export async function restoreBackup(db: SQLiteDatabase, input: Backup) {
     const providers = await db.getAllAsync<Row>(
       "SELECT * FROM payment_providers",
     );
-    for (const name of BACKUP_TABLES) {
+    for (const name of ALLOWED_TABLES) {
+      const rows = backup.tables[name];
+      if (!rows) continue;
       const info = await db.getAllAsync<{ name: string }>(
         `PRAGMA table_info(${name})`,
       );
@@ -166,7 +211,7 @@ export async function restoreBackup(db: SQLiteDatabase, input: Backup) {
         providers.length !== backup.tables[name].length
       )
         throw invalid();
-      for (const row of backup.tables[name]) {
+      for (const row of rows) {
         if (
           !sameKeys(row, columns) ||
           (Object.hasOwn(row, "id") &&
@@ -189,7 +234,7 @@ export async function restoreBackup(db: SQLiteDatabase, input: Backup) {
       }
     }
     for (const { name } of autoTables) {
-      const maxId = backup.tables[name as TableName].reduce(
+      const maxId = (backup.tables[name as TableName] ?? []).reduce(
         (max, row) => Math.max(max, row.id as number),
         0,
       );
