@@ -1,6 +1,7 @@
 import { AppText as Text } from "../../components/typography";
 import { View } from "react-native";
 import { Header, Screen, s } from "../../components/ui";
+import { DataBackup } from "../../components/data-backup";
 
 export default function SettingsScreen() {
   return (
@@ -24,10 +25,11 @@ export default function SettingsScreen() {
           열어도 유지돼요.
         </Text>
         <Text style={s.caption}>
-          현재 별도 백업과 기기 간 동기화는 제공하지 않아요. 앱을 삭제하거나 앱
-          데이터를 지우면 기록이 사라질 수 있어요.
+          기기 간 자동 동기화는 제공하지 않아요. 앱을 삭제하거나 브라우저
+          데이터를 지우기 전에 백업해 주세요.
         </Text>
       </View>
+      <DataBackup />
       <View style={s.card}>
         <Text style={s.sectionTitle}>고정비 캘린더 안내</Text>
         <Text style={s.body}>

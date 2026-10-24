@@ -45,6 +45,7 @@ const taxRepository = loadTypeScript("src/data/year-end-tax.ts");
 const taxDomain = loadTypeScript("src/utils/year-end-tax.ts");
 const interestRepository = loadTypeScript("src/data/interest-income.ts");
 const interestDomain = loadTypeScript("src/utils/interest-income.ts");
+const backupRepository = loadTypeScript("src/data/backup.ts");
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -245,6 +246,7 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
   };
   const runtime = hookRuntime("src/hooks/use-month-pin.tsx", {
     "expo-sqlite": { useSQLiteContext: () => "test-db" },
+    "../data/backup": backupRepository,
     "../data/database": {
       readExpenses: read,
       readMethods: read,
@@ -347,6 +349,179 @@ test("successful writes invalidate calendar snapshots even when the subsequent l
     /Write failed/,
   );
   assert.equal(render().dataRevision, beforeMonthlyTax + 1);
+});
+
+async function backupFixture(db) {
+  await repository.initializeDatabase(db);
+  await db.execAsync(`
+    INSERT INTO payment_methods (id, kind, providerCode, name) VALUES (1, 'bank', 'bank_kb', '통장');
+    INSERT INTO payment_methods (id, kind, providerCode, name, bankId, cardTypeCode, benefitTypeCode, benefitAmount)
+      VALUES (2, 'card', 'card_kb', '오하Check', 1, 'debit', 'variable', 10000);
+    INSERT INTO expenses (id, name, amountTypeCode, amount, chargeDay, methodId, isDeleted)
+      VALUES (3, '삭제한 월세', 'fixed', 500000, 31, 1, 1);
+    INSERT INTO expense_amount_versions (id, expenseId, effectiveMonth, amountTypeCode, amount)
+      VALUES (4, 3, '2025-01', 'fixed', 450000);
+    INSERT INTO ledger_entries (id, month, expenseId, name, amountTypeCode, day, amount, amountEntered, methodId)
+      VALUES (5, '2025-01', 3, '직접 확정한 지출', 'variable', 31, 0, 1, 1);
+    INSERT INTO card_benefit_versions (methodId, effectiveMonth, name, providerCode, providerName, benefitTypeCode, expectedAmount)
+      VALUES (99, '2025-01', '삭제한 카드', 'card_kb', 'KB국민카드', 'variable', 10000);
+    INSERT INTO monthly_card_benefits (id, month, methodId, name, providerCode, providerName, benefitTypeCode, expectedAmount, amount)
+      VALUES (6, '2025-01', 99, '삭제한 카드', 'card_kb', 'KB국민카드', 'variable', 10000, 0);
+    INSERT INTO annual_tax_settings VALUES (2026, 40000000);
+    INSERT INTO monthly_tax_spending (year, month, cash_receipt, debit_card, local_card, credit_card, confirmed)
+      VALUES (2026, 1, 0, 0, 100000, 0, 1);
+    INSERT INTO annual_tax_cards VALUES (2026, 2, 0);
+    INSERT INTO monthly_tax_cards (id, year, month, methodId, name, providerName, cardTypeCode, amount)
+      VALUES (7, 2026, 1, 2, '오하Check', 'KB국민카드', 'debit', 0);
+    INSERT INTO interest_income_entries (id, year, month, providerCode, accountAlias, amount, sortOrder)
+      VALUES (8, 2026, 1, 'bank_kb', '통장 별명', 0, 2);
+    UPDATE sqlite_sequence SET seq = 900 WHERE name = 'payment_methods';
+  `);
+}
+
+test("backup round-trip preserves every table, deleted history, confirmations, references and ID sequences after reopening", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "monthpin-backup-"));
+  const source = sqliteAdapter();
+  const targetPath = join(directory, "restored.db");
+  let target = sqliteAdapter(targetPath);
+  try {
+    await backupFixture(source);
+    const backup = await backupRepository.createBackup(source);
+    const before = JSON.stringify(backup.tables);
+    // Rows are intentionally unordered: bank references must survive this too.
+    backup.tables.payment_methods.reverse();
+    await repository.initializeDatabase(target);
+    await backupRepository.restoreBackup(
+      target,
+      backupRepository.parseBackup(JSON.stringify(backup)),
+    );
+    target.sqlite.close();
+    target = sqliteAdapter(targetPath);
+    await repository.initializeDatabase(target);
+    const restored = await backupRepository.createBackup(target);
+    assert.equal(JSON.stringify(restored.tables), before);
+    assert.deepEqual(restored.sequences, backup.sequences);
+    assert.equal(restored.tables.ledger_entries[0].amountEntered, 1);
+    assert.equal(restored.tables.monthly_tax_spending[0].confirmed, 1);
+    assert.equal(restored.tables.monthly_card_benefits[0].methodId, 99);
+    assert.equal(restored.tables.interest_income_entries[0].amount, 0);
+    await repository.saveMethod(target, bankInput);
+    assert.equal(
+      (await target.getFirstAsync("SELECT MAX(id) AS id FROM payment_methods"))
+        .id,
+      901,
+    );
+    const unchangedSource = await backupRepository.createBackup(source);
+    assert.equal(JSON.stringify(unchangedSource.tables), before);
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("backup import rejects existing data without changing any record or sequence", async () => {
+  const source = sqliteAdapter();
+  const target = sqliteAdapter();
+  try {
+    await backupFixture(source);
+    const backup = await backupRepository.createBackup(source);
+    await backupFixture(target);
+    const before = await backupRepository.createBackup(target);
+    await assert.rejects(
+      backupRepository.restoreBackup(target, backup),
+      /데이터가 없는 앱/,
+    );
+    const after = await backupRepository.createBackup(target);
+    assert.deepEqual(after.tables, before.tables);
+    assert.deepEqual(after.sequences, before.sequences);
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+  }
+});
+
+test("invalid backup data and late failures roll back the entire import and allow retry", async () => {
+  const source = sqliteAdapter();
+  const target = sqliteAdapter();
+  try {
+    await backupFixture(source);
+    const backup = await backupRepository.createBackup(source);
+    await repository.initializeDatabase(target);
+    const before = await backupRepository.createBackup(target);
+    const invalidBackups = [
+      (copy) => {
+        copy.schemaVersion++;
+      },
+      (copy) => {
+        delete copy.tables.monthly_tax_cards;
+      },
+      (copy) => {
+        copy.tables.interest_income_entries[0].amount = -1;
+      },
+      (copy) => {
+        copy.tables.monthly_tax_cards[0].methodId = 12345;
+      },
+      (copy) => {
+        copy.tables.expenses[0].extraColumn = "no";
+      },
+      (copy) => {
+        copy.sequences.find((row) => row.name === "payment_methods").seq = 0;
+      },
+      (copy) => {
+        copy.tables.interest_income_entries[0].providerCode = "bank_unknown";
+      },
+    ];
+    for (const change of invalidBackups) {
+      const copy = JSON.parse(JSON.stringify(backup));
+      change(copy);
+      await assert.rejects(backupRepository.restoreBackup(target, copy));
+      const after = await backupRepository.createBackup(target);
+      assert.deepEqual(after.tables, before.tables);
+      assert.deepEqual(after.sequences, before.sequences);
+    }
+    const run = target.runAsync;
+    target.runAsync = async (sql, ...params) => {
+      if (sql.startsWith("INSERT INTO interest_income_entries"))
+        throw new Error("disk failure");
+      return run(sql, ...params);
+    };
+    await assert.rejects(
+      backupRepository.restoreBackup(target, backup),
+      /disk failure/,
+    );
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).tables,
+      before.tables,
+    );
+    target.runAsync = run;
+    await backupRepository.restoreBackup(target, backup);
+    assert.deepEqual(
+      (await backupRepository.createBackup(target)).tables,
+      backup.tables,
+    );
+  } finally {
+    source.sqlite.close();
+    target.sqlite.close();
+  }
+});
+
+test("backup rejects unrelated files, unknown tables and future app schemas instead of silently omitting data", async () => {
+  for (const text of [
+    "not JSON",
+    "[]",
+    "{}",
+    JSON.stringify({ format: "another_app" }),
+  ])
+    assert.throws(() => backupRepository.parseBackup(text), /백업 파일/);
+  const db = sqliteAdapter();
+  try {
+    await repository.initializeDatabase(db);
+    await db.execAsync("CREATE TABLE future_records (id INTEGER PRIMARY KEY)");
+    await assert.rejects(backupRepository.createBackup(db), /업데이트/);
+  } finally {
+    db.sqlite.close();
+  }
 });
 
 function sqliteAdapter(path = ":memory:") {

@@ -17,9 +17,10 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router", "expo-sqlite", "expo-font"],
+    "plugins": ["expo-router", "expo-sqlite", "expo-font", "expo-sharing"],
     "scheme": "monthpin"
   }
 }

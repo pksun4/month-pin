@@ -15,6 +15,8 @@ import * as annualRepository from "../data/annual-summary";
 import * as taxRepository from "../data/year-end-tax";
 import * as taxCardRepository from "../data/year-end-tax-cards";
 import * as interestRepository from "../data/interest-income";
+import * as backupRepository from "../data/backup";
+import type { Backup } from "../data/backup";
 import type {
   Expense,
   ExpenseInput,
@@ -40,6 +42,8 @@ interface Store {
   busy: boolean;
   dataRevision: number;
   refresh: () => Promise<void>;
+  exportBackup: () => Promise<Backup>;
+  restoreBackup: (backup: Backup) => Promise<void>;
   saveExpense: (
     input: ExpenseInput,
     id?: number,
@@ -183,6 +187,20 @@ export function MonthPinProvider({ children }: { children: ReactNode }) {
         busy,
         dataRevision,
         refresh,
+        exportBackup: async () => {
+          if (saving.current)
+            throw new Error("저장이 끝난 후 다시 시도해 주세요.");
+          saving.current = true;
+          setBusy(true);
+          try {
+            return await runDatabase(() => backupRepository.createBackup(db));
+          } finally {
+            saving.current = false;
+            setBusy(false);
+          }
+        },
+        restoreBackup: (backup) =>
+          mutate(() => backupRepository.restoreBackup(db, backup)),
         saveExpense: (input, id, effectiveMonth, renewalSourceId) =>
           mutate(() =>
             repository.saveExpense(
