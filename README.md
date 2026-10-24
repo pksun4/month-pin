@@ -131,11 +131,17 @@ npx expo start --go --clear
 
 Cloudflare Pages는 `node_modules` 폴더를 정적 에셋에서도 제외합니다. 빌드 마지막의 `scripts/prepare-pages.cjs`가 Expo의 의존성 에셋을 `dist/assets/vendor/`로 옮기고, `public/_redirects`의 내부 재작성 규칙으로 기존 번들 URL을 연결합니다. SQLite WASM과 아이콘 폰트를 함께 보존하며, WASM 파일이 없거나 경로 규칙이 빠지면 빌드를 실패시킵니다. 앱 DB나 네이티브 앱의 에셋 경로는 변경하지 않습니다.
 
-Cloudflare Pages에서 Git 저장소를 연결할 경우 빌드 명령은 `npm run build:web`, 출력 폴더는 `dist`입니다. Git 연결 없이 배포할 때는 Cloudflare 공식 Wrangler의 `pages deploy dist`를 사용합니다. 두 프로젝트 방식은 생성 전에 선택해야 합니다. 브라우저 저장소가 주소별로 나뉘므로 실제 데이터는 매번 바뀌는 미리보기 주소 대신 고정된 운영 주소에서 불러옵니다.
+Cloudflare Pages에서 Git 저장소를 연결할 경우 빌드 명령은 `npm run build:deploy`, 출력 폴더는 `dist`입니다. 이 명령은 `npm run check`로 린트 → 타입 검사 → 테스트를 순서대로 실행하고, 모두 통과했을 때만 웹을 빌드합니다. 하나라도 실패하면 빌드 명령이 실패하므로 새 버전을 배포하지 않고 기존 배포를 유지합니다. `build:web`은 검사 없이 웹 파일만 생성하는 명령이므로 Cloudflare 배포 명령으로 지정하지 않습니다.
+
+Git 연결 없이 배포할 때는 `npm run build:deploy`를 통과한 `dist/`에 대해 Cloudflare 공식 Wrangler의 `pages deploy dist`를 사용합니다. 두 프로젝트 방식은 생성 전에 선택해야 합니다. 브라우저 저장소가 주소별로 나뉘므로 실제 데이터는 매번 바뀌는 미리보기 주소 대신 고정된 운영 주소에서 불러옵니다.
 
 배포 후 HTTPS, COOP/COEP, SQLite 로딩·저장·새로고침 후 유지와 백업 복원을 확인합니다. 웹 SQLite는 Expo에서 알파 지원으로 안내하고 있으므로 실제 휴대폰 브라우저에서도 확인합니다. 웹 배포는 기기 간 동기화나 서버 DB 연결을 추가하지 않습니다.
 
-현재 저장 방식은 iOS·Android를 대상으로 합니다. SQLite의 웹 실행 설정은 별도로 구성하지 않았습니다.
+### GitHub 자동 검사
+
+`.github/workflows/ci.yml`의 `CI` 워크플로가 모든 브랜치 푸시와 PR, 수동 실행에서 작동합니다. 잠금 파일 기준으로 의존성을 설치한 뒤 `npm run check`와 `npm run build:web`을 실행하며, 결과는 GitHub 저장소의 Actions 탭과 커밋의 체크에서 확인합니다. 같은 브랜치에 새 푸시가 오면 이전 검사를 취소합니다. GitHub 검사와 Cloudflare 빌드는 `.node-version`의 Node.js 22 계열을 사용합니다.
+
+GitHub CI와 Cloudflare는 각각 동일한 검사를 실행합니다. Cloudflare가 GitHub 체크 결과를 기다리는 구조는 아니며, 자체 빌드 안에서 검사를 다시 통과해야 배포하도록 구성합니다. 별도 배포 토큰 없이 GitHub에서는 검사 결과를 확인하고 Cloudflare에서는 잘못된 코드의 배포를 차단합니다. 앱의 화면·저장 데이터·백업 파일은 이 설정 변경의 영향을 받지 않습니다.
 
 은행·카드사 목록은 `src/data/providers.ts`에서 관리합니다. `bank_kb`, `card_samsung` 같은 앱 내부 고정 코드는 공식 금융기관 코드와 별개이며, 기관 이름을 변경해도 코드는 유지해야 합니다. DB에는 기관 목록을 `payment_providers`로 관리하고, 결제수단은 `providerCode`로 참조합니다. 새 등록과 수정은 목록 선택만 허용합니다.
 
