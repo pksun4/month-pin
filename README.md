@@ -131,17 +131,24 @@ npx expo start --go --clear
 
 Cloudflare Pages는 `node_modules` 폴더를 정적 에셋에서도 제외합니다. 빌드 마지막의 `scripts/prepare-pages.cjs`가 Expo의 의존성 에셋을 `dist/assets/vendor/`로 옮기고, `public/_redirects`의 내부 재작성 규칙으로 기존 번들 URL을 연결합니다. SQLite WASM과 아이콘 폰트를 함께 보존하며, WASM 파일이 없거나 경로 규칙이 빠지면 빌드를 실패시킵니다. 앱 DB나 네이티브 앱의 에셋 경로는 변경하지 않습니다.
 
-Cloudflare Pages에서 Git 저장소를 연결할 경우 빌드 명령은 `npm run build:deploy`, 출력 폴더는 `dist`입니다. 이 명령은 `npm run check`로 린트 → 타입 검사 → 테스트를 순서대로 실행하고, 모두 통과했을 때만 웹을 빌드합니다. 하나라도 실패하면 빌드 명령이 실패하므로 새 버전을 배포하지 않고 기존 배포를 유지합니다. `build:web`은 검사 없이 웹 파일만 생성하는 명령이므로 Cloudflare 배포 명령으로 지정하지 않습니다.
+운영 주소는 `https://month-pin.pages.dev`입니다. GitHub Actions에서 검사·빌드를 통과한 `dist/`만 기존 Cloudflare Pages 프로젝트 `month-pin`에 업로드합니다. Cloudflare의 Git 연결은 유지하되 Branch control에서 자동 운영 배포를 끄고 Preview branch를 None으로 설정해 중복 검사·빌드를 방지합니다. 프로젝트를 새로 만들거나 운영 주소를 바꾸지 않습니다.
 
-Git 연결 없이 배포할 때는 `npm run build:deploy`를 통과한 `dist/`에 대해 Cloudflare 공식 Wrangler의 `pages deploy dist`를 사용합니다. 두 프로젝트 방식은 생성 전에 선택해야 합니다. 브라우저 저장소가 주소별로 나뉘므로 실제 데이터는 매번 바뀌는 미리보기 주소 대신 고정된 운영 주소에서 불러옵니다.
+로컬에서 전체 검증과 배포 파일 생성을 함께 실행하려면 `npm run build:deploy`를 사용합니다. 이 명령은 린트 → 타입 검사 → 테스트 → 웹 빌드를 순서대로 실행하고 실패 시 중단합니다. 실제 데이터는 매번 바뀌는 미리보기 주소 대신 고정된 운영 주소에서 불러옵니다.
 
 배포 후 HTTPS, COOP/COEP, SQLite 로딩·저장·새로고침 후 유지와 백업 복원을 확인합니다. 웹 SQLite는 Expo에서 알파 지원으로 안내하고 있으므로 실제 휴대폰 브라우저에서도 확인합니다. 웹 배포는 기기 간 동기화나 서버 DB 연결을 추가하지 않습니다.
 
-### GitHub 자동 검사
+### GitHub 자동 검사와 배포
 
-`.github/workflows/ci.yml`의 `CI` 워크플로가 모든 브랜치 푸시와 PR, 수동 실행에서 작동합니다. 잠금 파일 기준으로 의존성을 설치한 뒤 `npm run check`와 `npm run build:web`을 실행하며, 결과는 GitHub 저장소의 Actions 탭과 커밋의 체크에서 확인합니다. 같은 브랜치에 새 푸시가 오면 이전 검사를 취소합니다. GitHub 검사와 Cloudflare 빌드는 `.node-version`의 Node.js 22 계열을 사용합니다.
+`.github/workflows/ci.yml`의 `CI` 워크플로가 모든 브랜치 푸시와 PR, 수동 실행에서 작동합니다. 잠금 파일 기준으로 의존성을 설치한 뒤 `npm run check`와 `npm run build:web`을 한 번 실행하며, 결과는 GitHub 저장소의 Actions 탭과 커밋의 체크에서 확인합니다. 같은 브랜치에 새 푸시가 오면 이전 실행을 취소합니다. 검사와 배포는 `.node-version`의 Node.js 22 계열을 사용합니다.
 
-GitHub CI와 Cloudflare는 각각 동일한 검사를 실행합니다. Cloudflare가 GitHub 체크 결과를 기다리는 구조는 아니며, 자체 빌드 안에서 검사를 다시 통과해야 배포하도록 구성합니다. 별도 배포 토큰 없이 GitHub에서는 검사 결과를 확인하고 Cloudflare에서는 잘못된 코드의 배포를 차단합니다. 앱의 화면·저장 데이터·백업 파일은 이 설정 변경의 영향을 받지 않습니다.
+`master` 푸시 또는 `master`에서의 수동 실행이 성공하면 `web-dist` 아티팩트를 저장하고, `needs: check-and-build`로 연결된 별도 배포 작업이 해당 실행의 파일을 내려받아 공식 Wrangler로 배포합니다. 아티팩트는 1일 보관하며 앱 코드와 정적 에셋만 포함합니다. PR과 다른 브랜치는 배포하지 않습니다. 검사·빌드가 실패하거나 취소되면 배포 작업이 시작되지 않고 기존 사이트가 유지됩니다.
+
+GitHub 저장소 Settings → Environments의 `production` 환경에는 배포 가능 브랜치를 `master`로 제한하고 다음 값을 등록합니다.
+
+- 환경 Secret `CLOUDFLARE_API_TOKEN`: 해당 Cloudflare 계정의 Cloudflare Pages Edit 권한만 가진 배포 토큰. 토큰 원문은 Git이나 문서·로그에 남기지 않습니다. 이 권한은 프로젝트 하나가 아닌 선택한 계정의 Pages에 적용됩니다.
+- 환경 Variable `CLOUDFLARE_ACCOUNT_ID`: Cloudflare 계정 ID. 비밀번호가 아니므로 일반 환경 변수로 관리합니다.
+
+토큰은 배포 작업에만 전달하며 의존성 설치·테스트·앱 빌드에는 주입하지 않습니다. Actions와 Wrangler는 확인한 버전으로 고정합니다. 앱의 화면·저장 데이터·백업 파일은 이 설정 변경의 영향을 받지 않습니다. 기존 Git 연동 프로젝트에도 자동 배포를 끈 뒤 Wrangler로 배포할 수 있습니다. [Cloudflare 공식 안내](https://developers.cloudflare.com/pages/configuration/git-integration/#disable-automatic-deployments)
 
 은행·카드사 목록은 `src/data/providers.ts`에서 관리합니다. `bank_kb`, `card_samsung` 같은 앱 내부 고정 코드는 공식 금융기관 코드와 별개이며, 기관 이름을 변경해도 코드는 유지해야 합니다. DB에는 기관 목록을 `payment_providers`로 관리하고, 결제수단은 `providerCode`로 참조합니다. 새 등록과 수정은 목록 선택만 허용합니다.
 
