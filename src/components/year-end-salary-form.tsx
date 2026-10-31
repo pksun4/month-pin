@@ -1,5 +1,9 @@
+import {
+  type ViewInstance,
+  type TextInputInstance as TextInput,
+  View,
+} from "react-native";
 import { useRef, useState } from "react";
-import { type TextInput, View } from "react-native";
 import { AppText as Text } from "./typography";
 import type { YearEndTaxSettings } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
@@ -23,7 +27,7 @@ export function YearEndSalaryForm({
   const [touched, setTouched] = useState(false);
   const [saveError, setSaveError] = useState("");
   const inputRef = useRef<TextInput>(null);
-  const containerRef = useRef<View>(null);
+  const containerRef = useRef<ViewInstance>(null);
   const savingRef = useRef(false);
   const reveal = useFormNavigation();
   const salary = parseGrossSalary(value);

@@ -1,5 +1,9 @@
+import {
+  type ViewInstance,
+  View,
+  type TextInputInstance as TextInput,
+} from "react-native";
 import { useEffect, useRef, useState } from "react";
-import { View, type TextInput } from "react-native";
 import { AppText as Text } from "./typography";
 import type { CardBenefitEntry, CardBenefitMonth } from "../data/models";
 import { useMonthPin } from "../hooks/use-month-pin";
@@ -155,7 +159,7 @@ function CardBenefitAmountField({
   onChange: (value: string) => void;
 }) {
   const inputRef = useRef<TextInput>(null);
-  const containerRef = useRef<View>(null);
+  const containerRef = useRef<ViewInstance>(null);
   const revealField = useFormNavigation();
   useEffect(() => {
     if (!focusRequest) return;

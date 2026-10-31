@@ -5,7 +5,7 @@ import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { SQLiteProvider } from "expo-sqlite";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { SafeAreaProvider } from "../components/safe-area";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { initializeDatabase } from "../data/database";
 import { MonthPinProvider } from "../hooks/use-month-pin";

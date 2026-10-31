@@ -334,7 +334,7 @@ export default function WalletScreen() {
                   />
                 }
               />
-            ) : null
+            ) : undefined
           }
           ListFooterComponent={
             <View style={listStyles.footer}>

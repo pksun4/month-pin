@@ -1,6 +1,5 @@
-import { AppText as Text } from "./typography";
-import { useEffect, useRef, useState } from "react";
 import {
+  type ViewInstance,
   Dimensions,
   Modal,
   Pressable,
@@ -9,7 +8,9 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppText as Text } from "./typography";
+import { useEffect, useRef, useState } from "react";
+import { SafeAreaView, useSafeAreaInsets } from "./safe-area";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "./ui";
 
@@ -35,8 +36,8 @@ export function SelectPopover<Code extends string>({
   disabled?: boolean;
   alignment?: "start" | "end";
 }) {
-  const triggerRef = useRef<View>(null);
-  const overlayRef = useRef<View>(null);
+  const triggerRef = useRef<ViewInstance>(null);
+  const overlayRef = useRef<ViewInstance>(null);
   const [anchor, setAnchor] = useState<Bounds | null>(null);
   const [overlay, setOverlay] = useState<Bounds | null>(null);
   const window = useWindowDimensions();
@@ -129,73 +130,75 @@ export function SelectPopover<Code extends string>({
         onRequestClose={close}
         supportedOrientations={["portrait", "landscape"]}
       >
-        <View
-          ref={overlayRef}
-          style={styles.overlay}
-          onLayout={() => {
-            overlayRef.current?.measureInWindow((x, y, width, height) => {
-              setOverlay({ x, y, width, height });
-            });
-          }}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            accessibilityRole="button"
-            accessibilityLabel={`${label} 닫기`}
-            onPress={close}
-          />
-          {placement && (
-            <View
-              accessibilityViewIsModal
-              accessibilityRole="menu"
-              accessibilityLabel={label}
-              onAccessibilityEscape={close}
-              style={[styles.menu, placement]}
-            >
-              <ScrollView
-                style={styles.scroll}
-                contentContainerStyle={styles.options}
-                keyboardShouldPersistTaps="handled"
-                bounces={false}
+        <SafeAreaView style={styles.overlay}>
+          <View
+            ref={overlayRef}
+            style={styles.overlay}
+            onLayout={() => {
+              overlayRef.current?.measureInWindow((x, y, width, height) => {
+                setOverlay({ x, y, width, height });
+              });
+            }}
+          >
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              accessibilityRole="button"
+              accessibilityLabel={`${label} 닫기`}
+              onPress={close}
+            />
+            {placement && (
+              <View
+                accessibilityViewIsModal
+                accessibilityRole="menu"
+                accessibilityLabel={label}
+                onAccessibilityEscape={close}
+                style={[styles.menu, placement]}
               >
-                {options.map((option) => (
-                  <Pressable
-                    key={option.code}
-                    accessibilityRole="menuitem"
-                    accessibilityState={{ selected: option.code === value }}
-                    onPress={() => {
-                      close();
-                      onChange(option.code);
-                    }}
-                    style={({ pressed }) => [
-                      styles.option,
-                      option.code === value && styles.selected,
-                      pressed && { backgroundColor: colors.bg },
-                    ]}
-                  >
-                    <View style={styles.check}>
-                      {option.code === value && (
-                        <Ionicons
-                          name="checkmark"
-                          size={19}
-                          color={colors.blue}
-                        />
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.optionLabel,
-                        option.code === value && styles.selectedLabel,
+                <ScrollView
+                  style={styles.scroll}
+                  contentContainerStyle={styles.options}
+                  keyboardShouldPersistTaps="handled"
+                  bounces={false}
+                >
+                  {options.map((option) => (
+                    <Pressable
+                      key={option.code}
+                      accessibilityRole="menuitem"
+                      accessibilityState={{ selected: option.code === value }}
+                      onPress={() => {
+                        close();
+                        onChange(option.code);
+                      }}
+                      style={({ pressed }) => [
+                        styles.option,
+                        option.code === value && styles.selected,
+                        pressed && { backgroundColor: colors.bg },
                       ]}
                     >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-        </View>
+                      <View style={styles.check}>
+                        {option.code === value && (
+                          <Ionicons
+                            name="checkmark"
+                            size={19}
+                            color={colors.blue}
+                          />
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.optionLabel,
+                          option.code === value && styles.selectedLabel,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </SafeAreaView>
       </Modal>
     </>
   );

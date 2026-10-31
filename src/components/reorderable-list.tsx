@@ -3,6 +3,7 @@ import {
   isValidElement,
   useLayoutEffect,
   useRef,
+  type ComponentType,
   type ReactElement,
   type RefObject,
 } from "react";
@@ -74,7 +75,9 @@ export function ReorderableList<Item>({
 
 function listComponent(component: ListProps<unknown>["ListHeaderComponent"]) {
   if (!component) return null;
-  return isValidElement(component) ? component : createElement(component);
+  return isValidElement(component)
+    ? component
+    : createElement(component as ComponentType);
 }
 
 function SectionedListSurface<Item>({

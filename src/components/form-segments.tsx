@@ -1,6 +1,12 @@
+import {
+  type ViewInstance,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { AppText as Text } from "./typography";
 import type { Ref } from "react";
-import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { colors, s, FieldLabel, FieldMessage } from "./ui";
 
 export function FormSegments<Code extends string>({
@@ -22,7 +28,7 @@ export function FormSegments<Code extends string>({
   required?: boolean;
   error?: string;
   onBlur?: () => void;
-  controlRef?: Ref<View>;
+  controlRef?: Ref<ViewInstance>;
 }) {
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale > 1.4;

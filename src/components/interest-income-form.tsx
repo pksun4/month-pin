@@ -1,5 +1,10 @@
+import {
+  type ViewInstance,
+  StyleSheet,
+  View,
+  type TextInputInstance as TextInput,
+} from "react-native";
 import { useRef, useState } from "react";
-import { StyleSheet, View, type TextInput } from "react-native";
 import { BANK_PROVIDERS, type BankProviderCode } from "../data/providers";
 import type { InterestIncomeEntry } from "../data/models";
 import { formatAmountInput, money } from "../utils/expenses";
@@ -62,8 +67,8 @@ export function InterestIncomeForm({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const savingRef = useRef(false);
-  const containers = useRef<Record<number, View | null>>({});
-  const controls = useRef<Record<string, TextInput | View | null>>({});
+  const containers = useRef<Record<number, ViewInstance | null>>({});
+  const controls = useRef<Record<string, TextInput | ViewInstance | null>>({});
   const pendingReveal = useRef<number | null>(null);
   const reveal = useFormNavigation();
   const disabled = busy || saving;

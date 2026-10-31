@@ -1,6 +1,5 @@
 import { Tabs } from "expo-router";
-import { Platform } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Platform, type ViewStyle } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, type IconName } from "../../components/ui";
 import { bodyFontStyle } from "../../components/typography";
@@ -39,27 +38,28 @@ const tabs: {
 ];
 
 export default function TabLayout() {
-  const insets = useSafeAreaInsets();
-  const webBottomPadding = Math.max(insets.bottom, 8);
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.blue,
         tabBarInactiveTintColor: colors.muted,
-        tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.line,
-          paddingTop: 8,
-          ...Platform.select({
-            web: {
+        tabBarStyle: [
+          {
+            backgroundColor: colors.white,
+            borderTopColor: colors.line,
+            paddingTop: 8,
+          },
+          Platform.OS === "web" &&
+            ({
               // Keep icon + label space independent of the home indicator inset.
-              height: 60 + webBottomPadding,
+              height: "calc(60px + max(8px, env(safe-area-inset-bottom, 0px)))",
               paddingTop: 4,
-              paddingBottom: webBottomPadding,
-            },
-          }),
-        },
+              paddingBottom: "max(8px, env(safe-area-inset-bottom, 0px))",
+              paddingLeft: "env(safe-area-inset-left, 0px)",
+              paddingRight: "env(safe-area-inset-right, 0px)",
+            } as unknown as ViewStyle),
+        ],
         tabBarLabelStyle: [
           { fontSize: 11, fontWeight: "600" },
           bodyFontStyle("600"),
@@ -74,10 +74,10 @@ export default function TabLayout() {
           name={tab.name}
           options={{
             title: tab.title,
-            tabBarIcon: ({ color, focused }) => (
+            tabBarIcon: ({ focused }) => (
               <Ionicons
                 name={focused ? tab.activeIcon : tab.icon}
-                color={color}
+                color={focused ? colors.blue : colors.muted}
                 size={23}
               />
             ),

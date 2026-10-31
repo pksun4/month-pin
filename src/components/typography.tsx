@@ -1,7 +1,6 @@
-import { forwardRef, useCallback, useRef, useState } from "react";
-import { isLoaded } from "expo-font";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import {
+  type TextInstance,
+  type TextInputInstance,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,6 +13,9 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
+import { forwardRef, useCallback, useRef, useState } from "react";
+import { isLoaded } from "expo-font";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors } from "./theme";
 
 export const FONT_ASSETS = {
@@ -50,7 +52,7 @@ function fontForStyle(style: TextProps["style"]) {
   return bodyFontStyle(flattened?.fontWeight);
 }
 
-export const AppText = forwardRef<NativeText, TextProps>(function AppText(
+export const AppText = forwardRef<TextInstance, TextProps>(function AppText(
   { style, ...props },
   ref,
 ) {
@@ -65,7 +67,7 @@ export type AppTextInputProps = TextInputProps & {
   suffix?: string;
 };
 
-export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
+export const AppTextInput = forwardRef<TextInputInstance, AppTextInputProps>(
   function AppTextInput(
     {
       style,
@@ -81,11 +83,11 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
     },
     ref,
   ) {
-    const inputRef = useRef<NativeTextInput | null>(null);
+    const inputRef = useRef<TextInputInstance | null>(null);
     const [draft, setDraft] = useState(defaultValue ?? "");
     const [suffixWidth, setSuffixWidth] = useState(0);
     const setInputRef = useCallback(
-      (input: NativeTextInput | null) => {
+      (input: TextInputInstance | null) => {
         inputRef.current = input;
         const cleanup: unknown =
           typeof ref === "function" ? ref(input) : undefined;
@@ -143,10 +145,7 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
             (canClear || suffix) && {
               paddingRight:
                 trailingSpace +
-                (suffix
-                  ? (suffixWidth ||
-                      fontSize * suffix.length) + 4
-                  : 0),
+                (suffix ? (suffixWidth || fontSize * suffix.length) + 4 : 0),
             },
             fontForStyle(style),
           ]}
@@ -160,12 +159,7 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
             onLayout={(event) => setSuffixWidth(event.nativeEvent.layout.width)}
             style={[inputStyles.suffix, { right: trailingSpace }]}
           >
-            <AppText
-              style={[
-                inputStyles.suffixText,
-                { fontSize },
-              ]}
-            >
+            <AppText style={[inputStyles.suffixText, { fontSize }]}>
               {suffix}
             </AppText>
           </View>

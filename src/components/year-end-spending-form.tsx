@@ -1,5 +1,10 @@
+import {
+  type ViewInstance,
+  StyleSheet,
+  type TextInputInstance as TextInput,
+  View,
+} from "react-native";
 import { useRef, useState } from "react";
-import { StyleSheet, type TextInput, View } from "react-native";
 import { AppText as Text } from "./typography";
 import {
   ButtonGroup,
@@ -58,7 +63,9 @@ export function YearEndSpendingForm({
     null,
   );
   const inputRefs = useRef<Partial<Record<string, TextInput | null>>>({});
-  const containerRefs = useRef<Partial<Record<string, View | null>>>({});
+  const containerRefs = useRef<Partial<Record<string, ViewInstance | null>>>(
+    {},
+  );
   const savingRef = useRef(false);
   const reveal = useFormNavigation();
   const parsed = Object.fromEntries(

@@ -14,7 +14,7 @@ test("button groups retain action handlers and disabled states when rerendered f
       StyleSheet: { create: (styles) => styles },
       useWindowDimensions: () => ({ width: 320, fontScale }),
     },
-    "react-native-safe-area-context": {},
+    "./safe-area": {},
     "@expo/vector-icons/Ionicons": "Icon",
     "../hooks/use-month-pin": { useMonthPin: () => ({}) },
   });

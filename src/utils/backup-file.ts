@@ -9,7 +9,7 @@ export async function saveBackupFile(text: string, filename: string) {
   const file = new File(Paths.cache, filename);
   try {
     file.create({ overwrite: true });
-    file.write(text);
+    await file.write(text);
     if (file.size > MAX_BACKUP_BYTES)
       throw new Error("백업 파일은 20MB까지 지원해요.");
     await Sharing.shareAsync(file.uri, {

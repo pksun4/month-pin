@@ -25,7 +25,13 @@ test("detail dialogs close through backdrop, close button or back, block closing
       StyleSheet: { create: (styles) => styles },
       useWindowDimensions: () => ({ width: 320, height: 568, fontScale: 2 }),
     },
-    "react-native-safe-area-context": {
+    "./safe-area": {
+      safeAreaPadding: (insets, extra) => ({
+        paddingTop: insets.top + extra,
+        paddingBottom: insets.bottom + extra,
+        paddingLeft: insets.left + extra,
+        paddingRight: insets.right + extra,
+      }),
       SafeAreaProvider: "SafeAreaProvider",
       SafeAreaView: "SafeAreaView",
       useSafeAreaInsets: () => ({ top: 20, bottom: 16, left: 0, right: 0 }),

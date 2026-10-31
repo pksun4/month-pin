@@ -1,3 +1,4 @@
+import { type ViewInstance } from "react-native";
 import type { MethodKind } from "../data/models";
 import {
   BANK_PROVIDERS,
@@ -7,7 +8,6 @@ import {
 import { FormSelect } from "./form-select";
 import { ProviderIcon } from "./provider-icon";
 import type { Ref } from "react";
-import type { View } from "react-native";
 
 export function ProviderSelect({
   kind,
@@ -26,7 +26,7 @@ export function ProviderSelect({
   required?: boolean;
   error?: string;
   onBlur?: () => void;
-  controlRef?: Ref<View>;
+  controlRef?: Ref<ViewInstance>;
 }) {
   const providers = kind === "bank" ? BANK_PROVIDERS : CARD_PROVIDERS;
   return (

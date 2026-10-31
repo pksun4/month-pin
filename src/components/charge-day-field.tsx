@@ -1,6 +1,6 @@
 import { AppText as Text, AppTextInput as TextInput } from "./typography";
 import { useState, type Ref } from "react";
-import type { TextInput as NativeTextInput } from "react-native";
+import type { TextInputInstance as NativeTextInput } from "react-native";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { parseDay } from "../utils/expenses";
 import { colors, s, FieldLabel, FieldMessage } from "./ui";

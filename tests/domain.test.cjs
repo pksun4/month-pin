@@ -4691,7 +4691,13 @@ test("shared fields expose visual error feedback and modal navigation waits for 
         useWindowDimensions: () => ({ width: 393, height: 852, fontScale: 1 }),
         StyleSheet: { create: (styles) => styles },
       },
-      "react-native-safe-area-context": {
+      "./safe-area": {
+        safeAreaPadding: (insets, extra) => ({
+          paddingTop: insets.top + extra,
+          paddingBottom: insets.bottom + extra,
+          paddingLeft: insets.left + extra,
+          paddingRight: insets.right + extra,
+        }),
         SafeAreaProvider: "SafeAreaProvider",
         SafeAreaView: "SafeAreaView",
         useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -5457,7 +5463,7 @@ test("calendar estimates follow month totals and card edits without changing day
   assert.equal(view.label("혜택 반영 예상액").props.children, "-14,000원");
   view.calendar.onSelect(ledgerDomain.daysInMonth(requestedMonth));
   view = render();
-  assert.equal(view.list.ListEmptyComponent, null);
+  assert.equal(view.list.ListEmptyComponent, undefined);
   view.label("카드 혜택 정산").props.onPress();
   view = render();
   assert.equal(
@@ -5494,7 +5500,7 @@ test("calendar estimates follow month totals and card edits without changing day
   assert.equal(view.label("혜택 반영 예상액").props.children, "—");
   assert.deepEqual(view.calendar.entries, []);
   assert.equal(view.calendar.dataReady, false);
-  assert.equal(view.list.ListFooterComponent, null);
+  assert.equal(view.list.ListFooterComponent, undefined);
   benefitsLoading = false;
   snapshot = { ...snapshot, loading: true };
   view = render();
@@ -5505,7 +5511,7 @@ test("calendar estimates follow month totals and card edits without changing day
   assert.equal(view.calendar.benefitsConfirmed, false);
   assert.equal(view.calendar.benefitsPending, false);
   assert.deepEqual(view.list.data, []);
-  assert.equal(view.list.ListFooterComponent, null);
+  assert.equal(view.list.ListFooterComponent, undefined);
   flatten(view.list.renderItem({ item: entries[2] }))
     .find((node) => node.type === "EntryRow")
     .props.onPress();

@@ -1,6 +1,5 @@
-import { AppText as Text, AppTextInput as TextInput } from "./typography";
-import { useState, type ReactNode, type Ref } from "react";
 import {
+  type ViewInstance,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -11,7 +10,9 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { AppText as Text, AppTextInput as TextInput } from "./typography";
+import { useState, type ReactNode, type Ref } from "react";
+import { SafeAreaProvider, SafeAreaView } from "./safe-area";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, s, FieldLabel, FieldMessage } from "./ui";
 
@@ -53,7 +54,7 @@ export function FormSelect<Code extends string | number | null>({
   error?: string;
   hint?: string;
   onBlur?: () => void;
-  controlRef?: Ref<View>;
+  controlRef?: Ref<ViewInstance>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

@@ -1,19 +1,9 @@
-import { AppText as Text, AppTextInput as TextInput } from "./typography";
 import {
-  createContext,
-  useContext,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-  type Ref,
-} from "react";
-import type {
-  StyleProp,
-  TextStyle,
-  TextInput as NativeTextInput,
-} from "react-native";
-import {
+  type ScrollViewInstance,
+  type ViewInstance,
+  type StyleProp,
+  type TextStyle,
+  type TextInputInstance as NativeTextInput,
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
@@ -25,11 +15,22 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { AppText as Text, AppTextInput as TextInput } from "./typography";
+import {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   SafeAreaProvider,
   SafeAreaView,
   useSafeAreaInsets,
-} from "react-native-safe-area-context";
+  safeAreaPadding,
+} from "./safe-area";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMonthPin } from "../hooks/use-month-pin";
 import { colors } from "./theme";
@@ -37,7 +38,7 @@ import { colors } from "./theme";
 export { colors } from "./theme";
 
 const FormNavigationContext = createContext<
-  ((field: View | null, focus?: () => void) => void) | null
+  ((field: ViewInstance | null, focus?: () => void) => void) | null
 >(null);
 
 export function useFormNavigation() {
@@ -281,9 +282,9 @@ export function FormModal({
 }) {
   // Keep the native presentation stable when a detail dialog expands into a form.
   const [transparent] = useState(() => presentation === "dialog");
-  const scrollRef = useRef<ScrollView>(null);
-  const contentRef = useRef<View>(null);
-  function revealField(field: View | null, focus?: () => void) {
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const contentRef = useRef<ViewInstance>(null);
+  function revealField(field: ViewInstance | null, focus?: () => void) {
     requestAnimationFrame(() => {
       if (!field || !contentRef.current) {
         focus?.();
@@ -389,9 +390,9 @@ function DialogContent({
   onClose: () => void;
   busy: boolean;
   contentLayout: "form" | "card";
-  scrollRef: Ref<ScrollView>;
-  contentRef: Ref<View>;
-  revealField: (field: View | null, focus?: () => void) => void;
+  scrollRef: Ref<ScrollViewInstance>;
+  contentRef: Ref<ViewInstance>;
+  revealField: (field: ViewInstance | null, focus?: () => void) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -411,15 +412,7 @@ function DialogContent({
         pointerEvents="box-none"
       >
         <View
-          style={[
-            s.dialogOverlay,
-            {
-              paddingTop: insets.top + 22,
-              paddingBottom: insets.bottom + 22,
-              paddingLeft: insets.left + 22,
-              paddingRight: insets.right + 22,
-            },
-          ]}
+          style={[s.dialogOverlay, safeAreaPadding(insets, 22)]}
           pointerEvents="box-none"
         >
           <View

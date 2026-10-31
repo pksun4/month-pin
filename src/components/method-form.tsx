@@ -1,6 +1,10 @@
+import {
+  type ViewInstance,
+  View,
+  type TextInputInstance as TextInput,
+} from "react-native";
 import { AppText as Text } from "./typography";
 import { useRef, useState } from "react";
-import { View, type TextInput } from "react-native";
 import type { MethodKind, PaymentMethod } from "../data/models";
 import type { ProviderCode } from "../data/providers";
 import {
@@ -67,19 +71,19 @@ export function MethodForm({
   >({});
   const [saveError, setSaveError] = useState("");
   const submitting = useRef(false);
-  const cardTypeCodeContainerRef = useRef<View>(null);
-  const providerCodeContainerRef = useRef<View>(null);
-  const nameContainerRef = useRef<View>(null);
-  const bankIdContainerRef = useRef<View>(null);
-  const dayContainerRef = useRef<View>(null);
-  const benefitTypeCodeContainerRef = useRef<View>(null);
-  const benefitAmountContainerRef = useRef<View>(null);
-  const cardTypeCodeControlRef = useRef<View>(null);
-  const providerCodeControlRef = useRef<View>(null);
+  const cardTypeCodeContainerRef = useRef<ViewInstance>(null);
+  const providerCodeContainerRef = useRef<ViewInstance>(null);
+  const nameContainerRef = useRef<ViewInstance>(null);
+  const bankIdContainerRef = useRef<ViewInstance>(null);
+  const dayContainerRef = useRef<ViewInstance>(null);
+  const benefitTypeCodeContainerRef = useRef<ViewInstance>(null);
+  const benefitAmountContainerRef = useRef<ViewInstance>(null);
+  const cardTypeCodeControlRef = useRef<ViewInstance>(null);
+  const providerCodeControlRef = useRef<ViewInstance>(null);
   const nameControlRef = useRef<TextInput>(null);
-  const bankIdControlRef = useRef<View>(null);
+  const bankIdControlRef = useRef<ViewInstance>(null);
   const dayControlRef = useRef<TextInput>(null);
-  const benefitTypeCodeControlRef = useRef<View>(null);
+  const benefitTypeCodeControlRef = useRef<ViewInstance>(null);
   const benefitAmountControlRef = useRef<TextInput>(null);
   const revealField = useFormNavigation();
   const banks = methods.filter((item) => item.kind === "bank");

@@ -261,7 +261,7 @@ export function ExpenseCalendarView({
                     : "목록에서 고정비를 등록하면 해당 월부터 표시돼요."
                 }
               />
-            ) : null
+            ) : undefined
           }
           ListFooterComponent={
             ready ? (
@@ -314,7 +314,7 @@ export function ExpenseCalendarView({
                     : "예상 혜택은 이 달에 적용되는 카드 혜택 기준이에요. 말일의 혜택 정산에서 실제 금액을 확정해 주세요."}
                 </Text>
               </View>
-            ) : null
+            ) : undefined
           }
         />
       </Screen>
