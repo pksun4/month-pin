@@ -9691,6 +9691,7 @@ test("input suffix stays separate from the value while clearing and respects dis
     );
   const runtime = hookRuntime("src/components/typography.tsx", {
     "react-native": {
+      Platform: { OS: "ios" },
       View: "View",
       Text: "Text",
       TextInput: "Input",

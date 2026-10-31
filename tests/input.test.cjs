@@ -46,6 +46,7 @@ function inputFixture(props = {}, forwardedRef = { current: null }) {
     "@expo/vector-icons/Ionicons": "Icon",
     "./theme": hookRuntime("src/components/theme.ts", {}).module,
     "react-native": {
+      Platform: { OS: "web" },
       Text: "Text",
       TextInput: "NativeInput",
       View: "View",

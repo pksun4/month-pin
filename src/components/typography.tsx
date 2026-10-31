@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useRef, useState } from "react";
 import { isLoaded } from "expo-font";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
+  Platform,
   Pressable,
   StyleSheet,
   Text as NativeText,
@@ -106,6 +107,11 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
       (value === undefined || !!onChangeText);
     const hasValue = (value ?? draft).length > 0;
     const flattened = StyleSheet.flatten(style);
+    // Small web inputs trigger focus zoom in iPhone Safari and home-screen apps.
+    const fontSize =
+      Platform.OS === "web"
+        ? Math.max(16, flattened?.fontSize ?? 16)
+        : (flattened?.fontSize ?? 16);
     const endPadding =
       flattened?.paddingRight ??
       flattened?.paddingEnd ??
@@ -133,12 +139,13 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
           style={[
             inputStyles.input,
             style,
+            Platform.OS === "web" && { fontSize },
             (canClear || suffix) && {
               paddingRight:
                 trailingSpace +
                 (suffix
                   ? (suffixWidth ||
-                      (Number(flattened?.fontSize) || 16) * suffix.length) + 4
+                      fontSize * suffix.length) + 4
                   : 0),
             },
             fontForStyle(style),
@@ -156,7 +163,7 @@ export const AppTextInput = forwardRef<NativeTextInput, AppTextInputProps>(
             <AppText
               style={[
                 inputStyles.suffixText,
-                { fontSize: flattened?.fontSize ?? 16 },
+                { fontSize },
               ]}
             >
               {suffix}
